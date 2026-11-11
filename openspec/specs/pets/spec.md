@@ -18,6 +18,12 @@ The system SHALL save a valid new pet against its owner, then redirect to the ow
 - **AND** the browser is redirected to the owner's page with the message "New Pet has been Added"
 - **CHECKED AT** form
 
+#### Scenario: A pet is added without a name suggestion
+
+- **WHEN** the add form is opened for an owner
+- **THEN** the name field is empty
+- **CHECKED AT** form
+
 ### Requirement: Edit a pet in place
 
 The system SHALL apply a valid edit to the existing pet record, keeping its identity and the owner's number of pets, then redirect to the owner's page with the message "Pet details has been edited".

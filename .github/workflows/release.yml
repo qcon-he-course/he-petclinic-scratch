@@ -78,7 +78,23 @@ jobs:
         run: |
           image="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
           echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          gh attestation verify "oci://$image@$DIGEST" --repo "$GITHUB_REPOSITORY"
+          # The check fails the job unless the record says: this workflow built this image
+          # from this commit. It prints nothing by itself, so the job prints what it read.
+          gh attestation verify "oci://$image@$DIGEST" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA" --format json > verified.json
+          {
+            echo "The record of \`$image@$DIGEST\` is valid. It says:"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            jq -r '.[0].verificationResult.signature.certificate
+              | "| Built by | `\(.buildSignerURI)` |",
+                "| From commit | `\(.sourceRepositoryDigest)` |",
+                "| In run | \(.runInvocationURI) |",
+                "| On a runner that is | \(.runnerEnvironment) |"' verified.json
+            echo
+          } | tee -a "$GITHUB_STEP_SUMMARY"
           docker buildx imagetools create --tag "$image:released" "$image@$DIGEST"
           {
             echo "Released \`$image:released\`, which is \`$DIGEST\`."

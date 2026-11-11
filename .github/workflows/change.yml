@@ -24,7 +24,7 @@ concurrency:
 
 env:
   HARNESS_REPOSITORY: qcon-he-course/he-harness
-  HARNESS_COMMIT: 951f11efa37f6f590a9c4d9ab7f96184dc07d9d3
+  HARNESS_COMMIT: 83c57e1e48c66c0a0fa8a3d85aa2df607d3a950d
   BASE_SHA: ${{ github.event.pull_request.base.sha }}
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 

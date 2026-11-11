@@ -24,7 +24,7 @@ concurrency:
 
 env:
   HARNESS_REPOSITORY: qcon-he-course/he-harness
-  HARNESS_COMMIT: 83c57e1e48c66c0a0fa8a3d85aa2df607d3a950d
+  HARNESS_COMMIT: ec143def2f23795f74b9ba6f35a88f99afeead42
   # Which reviewers run: a repository variable, set by the repository's owners, so a
   # pull request cannot drop one. Default: both vendors.
   REVIEWERS: ${{ vars.REVIEWERS || 'claude codex' }}

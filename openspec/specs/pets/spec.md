@@ -16,6 +16,7 @@ The system SHALL save a valid new pet against its owner, then redirect to the ow
 - **WHEN** the add form is submitted for an owner with name "Betty", type "hamster" and birth date 2015-02-12
 - **THEN** the owner is saved with one more pet, named "Betty", of type "hamster", born 2015-02-12
 - **AND** the browser is redirected to the owner's page with the message "New Pet has been Added"
+- **CHECKED AT** form
 
 ### Requirement: Edit a pet in place
 
@@ -27,6 +28,7 @@ The system SHALL apply a valid edit to the existing pet record, keeping its iden
 - **THEN** the same pet record has name "Betty", type "snake" and birth date 2015-02-12
 - **AND** the owner has the same number of pets as before
 - **AND** the browser is redirected to the owner's page with the message "Pet details has been edited"
+- **CHECKED AT** form
 
 ### Requirement: Pet name is required
 
@@ -37,12 +39,14 @@ The system MUST reject a blank pet name on either form with the error "is requir
 - **WHEN** the add form is submitted with the name " " and a valid type and birth date
 - **THEN** the form is shown again with exactly one error, "is required", on the name
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 #### Scenario: Blank name on the edit form
 
 - **WHEN** the edit form is submitted with an empty name
 - **THEN** the form is shown again with "is required" on the name
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 ### Requirement: Pet name is at most 30 characters
 
@@ -52,12 +56,14 @@ The system MUST reject a pet name longer than 30 characters on either form, and 
 
 - **WHEN** either form is submitted with a name of 30 characters and otherwise valid values
 - **THEN** the pet is saved and the browser is redirected to the owner's page
+- **CHECKED AT** form
 
 #### Scenario: Thirty-one characters is rejected
 
 - **WHEN** either form is submitted with a name of 31 characters
 - **THEN** the form is shown again with an error on the name
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 ### Requirement: Pet name is unique per owner, ignoring case
 
@@ -68,17 +74,20 @@ The system MUST reject a pet name that another pet of the same owner already has
 - **WHEN** the owner has a pet named "petty" and the add form is submitted with the name "PETTY"
 - **THEN** the form is shown again with "is already in use" on the name
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 #### Scenario: Renaming a pet to another pet's name
 
 - **WHEN** the owner has pets "petty" and "doggy" and "doggy" is edited to the name "PETTY"
 - **THEN** the form is shown again with "is already in use" on the name
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 #### Scenario: Renaming a pet to its own name in another case
 
 - **WHEN** the pet "petty" is edited to the name "PETTY"
 - **THEN** the edit is saved
+- **CHECKED AT** form
 
 ### Requirement: Duplicate names caught by the database
 
@@ -89,17 +98,20 @@ When the database rejects a save because of the unique constraint on owner and p
 - **WHEN** two add requests for the same owner and the same new name arrive at the same time
 - **THEN** exactly one pet with that name is saved
 - **AND** the other request adds no pet
+- **CHECKED AT** concurrency
 
 #### Scenario: The constraint is reported as a duplicate name
 
 - **WHEN** saving the owner fails with a data integrity violation whose message names `unique_owner_pet_name`, in any case
 - **THEN** the form is shown again with "is already in use" on the name
+- **CHECKED AT** form
 
 #### Scenario: Another integrity violation
 
 - **WHEN** saving the owner fails with a data integrity violation that does not name the owner-and-pet-name constraint
 - **THEN** the request fails with that error
 - **AND** the form does not show a duplicate-name error
+- **CHECKED AT** form
 
 ### Requirement: Birth date is required
 
@@ -110,6 +122,7 @@ The system MUST reject a missing or empty birth date on either form with the err
 - **WHEN** either form is submitted with an empty birth date
 - **THEN** the form is shown again with "is required" on the birth date
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 ### Requirement: Birth date is a valid date, not in the future
 
@@ -119,23 +132,27 @@ The system MUST reject, on either form, a birth date that is not a date in the f
 
 - **WHEN** either form is submitted with today's date as the birth date
 - **THEN** the pet is saved
+- **CHECKED AT** form
 
 #### Scenario: A future date is rejected on the add form
 
 - **WHEN** the add form is submitted with tomorrow's date as the birth date
 - **THEN** the form is shown again with "invalid date" on the birth date
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 #### Scenario: A future date is rejected on the edit form
 
 - **WHEN** the edit form is submitted with a birth date one month from today
 - **THEN** the form is shown again with "invalid date" on the birth date
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 #### Scenario: A malformed date is rejected
 
 - **WHEN** the add form is submitted with the birth date "2015/02/12"
 - **THEN** the form is shown again with two errors on the birth date: "invalid date" and "is required"
+- **CHECKED AT** form
 
 ### Requirement: Pet type is required when adding a pet
 
@@ -146,11 +163,13 @@ The system MUST reject a new pet that has no type, with the error "is required" 
 - **WHEN** the add form is submitted without a type
 - **THEN** the form is shown again with "is required" on the type
 - **AND** nothing is saved
+- **CHECKED AT** form
 
 #### Scenario: Unknown type on the add form
 
 - **WHEN** the add form is submitted with the type "lizard", which is not a known pet type
 - **THEN** the form is shown again with an error on the type
+- **CHECKED AT** form
 
 ### Requirement: Validation errors are reported together
 
@@ -160,11 +179,13 @@ The system SHALL report every validation error of a submission at once, in no pa
 
 - **WHEN** the add form is submitted with no type, the name of an existing pet and tomorrow's date
 - **THEN** the form is shown again with three errors: "is required" on the type, "is already in use" on the name and "invalid date" on the birth date
+- **CHECKED AT** form
 
 #### Scenario: Two errors on the edit form
 
 - **WHEN** a pet with no stored birth date is edited to the name of another pet, without a birth date
 - **THEN** the form is shown again with two errors: "is required" on the birth date and "is already in use" on the name
+- **CHECKED AT** form
 
 ### Requirement: The pet id cannot be set from the form
 
@@ -175,3 +196,4 @@ The system MUST ignore an `id` parameter submitted with either form. The pet tha
 - **WHEN** the edit form for pet 1 is submitted with the extra parameter `id=99`
 - **THEN** pet 1 is updated
 - **AND** no pet with id 99 exists afterwards
+- **CHECKED AT** form

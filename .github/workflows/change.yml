@@ -90,6 +90,7 @@ jobs:
             out/sensors.md
             out/change.txt
           if-no-files-found: ignore
+          overwrite: true
 
   # Deterministic before semantic: on a red build no reviewer runs, and no model is paid
   # to learn that the build fails.
@@ -155,6 +156,7 @@ jobs:
         with:
           name: review-${{ matrix.reviewer }}
           path: upload
+          overwrite: true
 
   triage:
     needs: [sensors, review]
@@ -193,6 +195,7 @@ jobs:
           name: packet
           path: run/packet.md
           if-no-files-found: ignore
+          overwrite: true
 
   merge:
     needs: triage

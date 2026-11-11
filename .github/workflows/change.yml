@@ -1,8 +1,9 @@
 # Every pull request to the protected branch goes through the same four jobs.
 #
 #   sensors   deterministic checks, the build, the tests, mutation testing. No model key.
-#   review    two reviewers from two vendors. Each holds one API key, reads the change,
-#             runs none of its code and cannot write to the repository.
+#   review    two reviewers from two vendors, only when the sensors are green. Each holds
+#             one API key, reads the change, runs none of its code and cannot write to
+#             the repository.
 #   triage    the policy. No model, no key. Its result is the required status check.
 #   merge     only when the policy says a person is not needed. No model.
 #
@@ -23,7 +24,7 @@ concurrency:
 
 env:
   HARNESS_REPOSITORY: qcon-he-course/he-harness
-  HARNESS_COMMIT: 1f0e2a540354676938d5c260c18a49e24c2377ed
+  HARNESS_COMMIT: 951f11efa37f6f590a9c4d9ab7f96184dc07d9d3
   BASE_SHA: ${{ github.event.pull_request.base.sha }}
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
@@ -33,6 +34,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    outputs:
+      red: ${{ steps.sensors.outputs.red }}
     steps:
       - name: Check out the pull request's head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,6 +58,7 @@ jobs:
           cache: maven
           cache-dependency-path: change/pom.xml
       - name: Run the sensors
+        id: sensors
         run: harness/ci/sensors.sh change "$BASE_SHA" out
       - name: Show the results
         if: always()
@@ -69,8 +73,11 @@ jobs:
             out/change.txt
           if-no-files-found: ignore
 
+  # Deterministic before semantic: on a red build no reviewer runs, and no model is paid
+  # to learn that the build fails.
   review:
     needs: sensors
+    if: needs.sensors.outputs.red == 'no'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:

@@ -25,6 +25,9 @@ concurrency:
 env:
   HARNESS_REPOSITORY: qcon-he-course/he-harness
   HARNESS_COMMIT: 83c57e1e48c66c0a0fa8a3d85aa2df607d3a950d
+  # Which reviewers run: a repository variable, set by the repository's owners, so a
+  # pull request cannot drop one. Default: both vendors.
+  REVIEWERS: ${{ vars.REVIEWERS || 'claude codex' }}
   BASE_SHA: ${{ github.event.pull_request.base.sha }}
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
@@ -36,6 +39,7 @@ jobs:
       contents: read
     outputs:
       red: ${{ steps.sensors.outputs.red }}
+      reviewers: ${{ steps.reviewers.outputs.matrix }}
     steps:
       - name: Check out the pull request's head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,6 +61,20 @@ jobs:
           java-version: "17"
           cache: maven
           cache-dependency-path: change/pom.xml
+      - name: Name the reviewers
+        id: reviewers
+        run: |
+          rows=""
+          for r in $REVIEWERS; do
+            case "$r" in
+              claude) row='{"reviewer":"claude","package":"@anthropic-ai/claude-code@2.1.281"}' ;;
+              codex) row='{"reviewer":"codex","package":"@openai/codex@0.163.0"}' ;;
+              *) echo "unknown reviewer: $r" >&2; exit 1 ;;
+            esac
+            rows="${rows:+$rows,}$row"
+          done
+          [ -n "$rows" ] || { echo "no reviewer named" >&2; exit 1; }
+          echo "matrix=[$rows]" >> "$GITHUB_OUTPUT"
       - name: Run the sensors
         id: sensors
         run: harness/ci/sensors.sh change "$BASE_SHA" out
@@ -85,11 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - reviewer: claude
-            package: "@anthropic-ai/claude-code@2.1.281"
-          - reviewer: codex
-            package: "@openai/codex@0.163.0"
+        include: ${{ fromJSON(needs.sensors.outputs.reviewers) }}
     steps:
       - name: Check out the pull request's head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

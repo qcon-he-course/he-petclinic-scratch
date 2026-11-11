@@ -176,15 +176,25 @@ jobs:
           ref: ${{ env.HARNESS_COMMIT }}
           path: harness
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      # Each artifact by name: with one artifact in a run, a download of "all" drops the
+      # folder that carries its name.
+      - name: Fetch the sensors' results
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: artifacts
+          name: sensors
+          path: run/inputs
+        continue-on-error: true
+      - name: Fetch the reviews
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: review-*
+          path: reviews
+          merge-multiple: true
         continue-on-error: true
       - name: Gather what the policy reads
         run: |
           mkdir -p run/inputs
-          cp artifacts/sensors/sensors.md artifacts/sensors/change.txt run/inputs/ 2> /dev/null || true
-          cp artifacts/review-*/review-step6-*.md run/inputs/ 2> /dev/null || true
+          cp reviews/review-step6-*.md run/inputs/ 2> /dev/null || true
           ls -l run/inputs
       - name: Apply the policy
         id: gate

@@ -1,0 +1,189 @@
+# Every pull request to the protected branch goes through the same four jobs.
+#
+#   sensors   deterministic checks, the build, the tests, mutation testing. No model key.
+#   review    two reviewers from two vendors. Each holds one API key, reads the change,
+#             runs none of its code and cannot write to the repository.
+#   triage    the policy. No model, no key. Its result is the required status check.
+#   merge     only when the policy says a person is not needed. No model.
+#
+# The checks themselves are not in this repository: each job takes them from the
+# harness repository at a pinned commit, so a pull request cannot edit what judges it.
+# A change to this file needs a code owner's review (.github/CODEOWNERS).
+name: change
+
+on:
+  pull_request:
+    branches: [week-4]
+
+permissions: {}
+
+concurrency:
+  group: change-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  HARNESS_REPOSITORY: qcon-he-course/he-harness
+  HARNESS_COMMIT: 1f0e2a540354676938d5c260c18a49e24c2377ed
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+jobs:
+  sensors:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the pull request's head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          path: change
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the harness at its pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.HARNESS_REPOSITORY }}
+          ref: ${{ env.HARNESS_COMMIT }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: change/pom.xml
+      - name: Run the sensors
+        run: harness/ci/sensors.sh change "$BASE_SHA" out
+      - name: Show the results
+        if: always()
+        run: |
+          if [ -f out/sensors.md ]; then cat out/sensors.md >> "$GITHUB_STEP_SUMMARY"; else echo "The sensors wrote no summary." >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sensors
+          path: |
+            out/sensors.md
+            out/change.txt
+          if-no-files-found: ignore
+
+  review:
+    needs: sensors
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - reviewer: claude
+            package: "@anthropic-ai/claude-code@2.1.281"
+          - reviewer: codex
+            package: "@openai/codex@0.163.0"
+    steps:
+      - name: Check out the pull request's head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          path: change
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the harness at its pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.HARNESS_REPOSITORY }}
+          ref: ${{ env.HARNESS_COMMIT }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sensors
+          path: inputs
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the reviewer's command-line tool
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: npm install --global "$PACKAGE"
+      - name: Review, with one key and no shell
+        env:
+          REVIEWER: ${{ matrix.reviewer }}
+          ANTHROPIC_API_KEY: ${{ matrix.reviewer == 'claude' && secrets.ANTHROPIC_API_KEY || '' }}
+          CODEX_API_KEY: ${{ matrix.reviewer == 'codex' && secrets.OPENAI_API_KEY || '' }}
+          REVIEW_BUDGET_USD: "2"
+          REVIEW_MAX_TURNS: "60"
+          REVIEW_TIME_CAP: "900"
+        run: |
+          git -C change reset --quiet --mixed "$(git -C change merge-base "$BASE_SHA" HEAD)"
+          harness/review/review-headless.sh change "$(cat inputs/change.txt)" inputs review
+      - name: Keep the review under its reviewer's name
+        if: always()
+        env:
+          REVIEWER: ${{ matrix.reviewer }}
+        run: |
+          mkdir -p upload
+          if [ -f review/review.md ]; then cp review/review.md "upload/review-step6-$REVIEWER.md"; fi
+          if [ -f review/stderr.txt ]; then tail -c 2000 review/stderr.txt > "upload/stderr-$REVIEWER.txt"; fi
+          echo "no review is a failed check" > "upload/ran-$REVIEWER.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: review-${{ matrix.reviewer }}
+          path: upload
+
+  triage:
+    needs: [sensors, review]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      eligible: ${{ steps.gate.outputs.eligible }}
+      rung: ${{ steps.gate.outputs.rung }}
+    steps:
+      - name: Check out the harness at its pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.HARNESS_REPOSITORY }}
+          ref: ${{ env.HARNESS_COMMIT }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+        continue-on-error: true
+      - name: Gather what the policy reads
+        run: |
+          mkdir -p run/inputs
+          cp artifacts/sensors/sensors.md artifacts/sensors/change.txt run/inputs/ 2> /dev/null || true
+          cp artifacts/review-*/review-step6-*.md run/inputs/ 2> /dev/null || true
+          ls -l run/inputs
+      - name: Apply the policy
+        id: gate
+        run: harness/ci/gate.sh run/inputs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: packet
+          path: run/packet.md
+          if-no-files-found: ignore
+
+  merge:
+    needs: triage
+    if: needs.triage.outputs.rung == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge when the required check has passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --auto --match-head-commit "$HEAD_SHA"

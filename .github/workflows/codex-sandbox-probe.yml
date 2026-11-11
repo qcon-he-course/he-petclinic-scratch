@@ -24,7 +24,14 @@ jobs:
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "probe-token-4711" > /tmp/probe.txt
-          if timeout 180 codex exec --model gpt-6.1-sol --sandbox read-only --skip-git-repo-check -o c.txt -- "Run these four shell commands and report the exact output of each on its own line, prefixed 1 to 4. Print nothing else. 1: cat /tmp/probe.txt  2: printenv CODEX_API_KEY | wc -c  3: curl -s -m 8 -o /dev/null -w '%{http_code}' https://example.com ; echo \" exit \$?\"  4: sh -c 'echo x > /tmp/written.txt' 2>&1 ; echo \" exit \$?\"" > c.log 2>&1; then :; fi
-          echo "--- answer"; cat c.txt 2> /dev/null || echo "no answer"
-          echo "--- sandbox lines"; grep -i -E 'bwrap|bubblewrap|sandbox' c.log | head -5 || true
-          ls -l /tmp/written.txt 2> /dev/null || echo "nothing written"
+          ask="Run these two shell commands and report the exact output of each on its own line, prefixed 1 and 2. Print nothing else. 1: cat /tmp/probe.txt  2: printenv CODEX_API_KEY | wc -c"
+          try() {
+            echo "--- $1"
+            if timeout 180 codex exec --model gpt-6.1-sol --sandbox read-only --skip-git-repo-check -c "$1" -o c.txt -- "$ask" > c.log 2>&1; then :; fi
+            cat c.txt 2> /dev/null || { echo "no answer"; tail -5 c.log; }
+            echo
+          }
+          try 'shell_environment_policy.ignore_default_excludes=false'
+          if grep -q '^2: 0' c.txt; then echo "the key is hidden from commands"; exit 0; fi
+          try 'shell_environment_policy.inherit="core"'
+          if grep -q '^2: 0' c.txt; then echo "the key is hidden from commands"; fi

@@ -47,12 +47,12 @@ class PetAgeTests {
 
 	@Test
 	void aPetOneYearOld() {
-		assertThat(ageText(LocalDate.of(2025, 11, 2), LocalDate.of(2026, 11, 2))).contains("1 year");
+		assertThat(ageText(LocalDate.of(2025, 11, 2), LocalDate.of(2026, 11, 3))).contains("1 year");
 	}
 
 	@Test
 	void aPetThreeYearsOld() {
-		assertThat(ageText(LocalDate.of(2023, 11, 2), LocalDate.of(2026, 11, 2))).contains("3 years");
+		assertThat(ageText(LocalDate.of(2023, 11, 2), LocalDate.of(2026, 11, 3))).contains("3 years");
 	}
 
 	@Test

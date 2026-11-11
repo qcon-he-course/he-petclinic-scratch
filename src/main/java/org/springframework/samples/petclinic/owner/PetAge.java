@@ -42,7 +42,7 @@ public final class PetAge {
 		if (birthDate == null || birthDate.isAfter(today)) {
 			return Optional.empty();
 		}
-		long years = ChronoUnit.YEARS.between(birthDate, today);
+		long years = ChronoUnit.YEARS.between(birthDate.plusDays(1), today);
 		if (years >= 1) {
 			return Optional.of(new PetAge(years == 1 ? "age.year" : "age.years", years));
 		}

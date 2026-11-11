@@ -1,7 +1,7 @@
 # pets Specification
 
 ## Purpose
-Adding a pet to an owner and editing an existing pet through the pet forms. A baseline of current behaviour, written from characterization tests.
+Adding a pet to an owner and editing an existing pet through the pet forms, and a pet's details on the owner's page. A baseline of current behaviour, written from characterization tests.
 
 Known behaviour, not requirements: an unknown pet id ends in a NullPointerException and the error page; a rejected edit has already bound the submitted values onto the loaded pet, though nothing is saved. Both are defects outside this baseline; do not read them as intended.
 

@@ -321,13 +321,6 @@
         <artifactId>pitest-maven</artifactId>
         <version>1.30.1</version>
         <configuration>
-          <targetClasses>
-            <param>org.springframework.samples.petclinic.owner.PetController</param>
-            <param>org.springframework.samples.petclinic.owner.PetValidator</param>
-          </targetClasses>
-          <targetTests>
-            <param>org.springframework.samples.petclinic.owner.Pet*Tests</param>
-          </targetTests>
           <timestampedReports>false</timestampedReports>
           <outputFormats>
             <param>HTML</param>

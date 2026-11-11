@@ -1,0 +1,17 @@
+# Files that decide what an agent is told and what a change is checked against.
+# A change to any of them needs a code owner's review before it merges.
+
+/.github/                             @premanandc
+/AGENTS.md                            @premanandc
+/CLAUDE.md                            @premanandc
+/.claude/                             @premanandc
+/.agents/                             @premanandc
+/docs/project-baseline.md             @premanandc
+/openspec/config.yaml                 @premanandc
+/openspec/schemas/                    @premanandc
+/pom.xml                              @premanandc
+/src/test/resources/archunit_store/   @premanandc
+/src/test/resources/archunit.properties @premanandc
+/src/test/java/org/springframework/samples/petclinic/ArchitectureTests.java @premanandc
+/src/test/java/**/*CharacterizationTests.java @premanandc
+/src/checkstyle/                      @premanandc

@@ -1,4 +1,4 @@
-# Scratch only: why Codex's read-only sandbox cannot read a file on this runner, and what fixes it.
+# Scratch only: Codex's read-only sandbox on this runner with one fix and no extra package.
 name: codex-sandbox-probe
 on:
   push:
@@ -15,33 +15,16 @@ jobs:
         with:
           node-version: "22"
       - run: npm install --global @openai/codex@0.163.0
-      - name: The runner as it is
+      - name: Lift the restriction on unprivileged user namespaces
         run: |
-          sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone || true
           command -v bwrap || echo "no bwrap on PATH"
-          ls /etc/apparmor.d | grep -i -E 'bwrap|unprivileged' || echo "no bwrap profile"
-      - name: "Fix A: bubblewrap from the package manager"
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends bubblewrap > /dev/null
-          bwrap --version
-          ls /etc/apparmor.d | grep -i -E 'bwrap' || echo "no bwrap profile"
-          if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent cat /etc/hostname; then echo "A: bwrap works"; else echo "A: bwrap FAILS"; fi
-      - name: "Fix A, with Codex"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Codex, read-only, with the bundled bubblewrap
         env:
           CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "probe-token-4711" > /tmp/probe.txt
-          if timeout 120 codex exec --model gpt-6.1-sol --sandbox read-only --skip-git-repo-check -o a.txt -- "Read the file /tmp/probe.txt and reply with its content only. If you cannot read it, reply CANNOT and the error." > a.log 2>&1; then :; fi
-          echo "A answer: $(cat a.txt 2> /dev/null)"; grep -i -E 'bwrap|bubblewrap' a.log | head -5 || true
-      - name: "Fix B: lift the restriction on unprivileged user namespaces"
-        run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent cat /etc/hostname; then echo "B: bwrap works"; else echo "B: bwrap FAILS"; fi
-      - name: "Fix B, with Codex"
-        env:
-          CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          if timeout 120 codex exec --model gpt-6.1-sol --sandbox read-only --skip-git-repo-check -o b.txt -- "Read the file /tmp/probe.txt and reply with its content only. If you cannot read it, reply CANNOT and the error. Then try to write the word x to /tmp/written.txt and say whether it worked." > b.log 2>&1; then :; fi
-          echo "B answer: $(cat b.txt 2> /dev/null)"; grep -i -E 'bwrap|bubblewrap' b.log | head -5 || true
-          ls -l /tmp/written.txt 2> /dev/null || echo "nothing written: the sandbox is read-only"
+          if timeout 180 codex exec --model gpt-6.1-sol --sandbox read-only --skip-git-repo-check -o c.txt -- "Run these four shell commands and report the exact output of each on its own line, prefixed 1 to 4. Print nothing else. 1: cat /tmp/probe.txt  2: printenv CODEX_API_KEY | wc -c  3: curl -s -m 8 -o /dev/null -w '%{http_code}' https://example.com ; echo \" exit \$?\"  4: sh -c 'echo x > /tmp/written.txt' 2>&1 ; echo \" exit \$?\"" > c.log 2>&1; then :; fi
+          echo "--- answer"; cat c.txt 2> /dev/null || echo "no answer"
+          echo "--- sandbox lines"; grep -i -E 'bwrap|bubblewrap|sandbox' c.log | head -5 || true
+          ls -l /tmp/written.txt 2> /dev/null || echo "nothing written"

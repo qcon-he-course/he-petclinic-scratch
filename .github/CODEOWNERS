@@ -15,3 +15,4 @@
 /src/test/java/org/springframework/samples/petclinic/ArchitectureTests.java @premanandc
 /src/test/java/**/*CharacterizationTests.java @premanandc
 /src/checkstyle/                      @premanandc
+/Dockerfile                           @premanandc

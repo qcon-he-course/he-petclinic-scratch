@@ -215,9 +215,23 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write
     steps:
       - name: Merge when the required check has passed
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --auto --match-head-commit "$HEAD_SHA"
+      # A merge made with this workflow's token starts no workflow. A dispatch does.
+      - name: Start the release of the merged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          state="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
+          if [ "$state" = MERGED ]; then
+            gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$BASE"
+          else
+            echo "The pull request is $state: no release started." >> "$GITHUB_STEP_SUMMARY"
+          fi

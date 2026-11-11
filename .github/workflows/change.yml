@@ -24,7 +24,7 @@ concurrency:
 
 env:
   HARNESS_REPOSITORY: qcon-he-course/he-harness
-  HARNESS_COMMIT: 463dd92cee7ec3d78f1b21fad7e3b0a6ef0d97fa
+  HARNESS_COMMIT: cd396740e99c2c515a4832b89934179d6688a376
   # Which reviewers run: a repository variable, set by the repository's owners, so a
   # pull request cannot drop one. Default: both vendors.
   REVIEWERS: ${{ vars.REVIEWERS || 'claude codex' }}
@@ -131,7 +131,12 @@ jobs:
         env:
           PACKAGE: ${{ matrix.package }}
         run: npm install --global "$PACKAGE"
-      - name: Review, with one key and no shell
+      # Codex reads files through commands in a sandbox with no write access and no
+      # network. Ubuntu 24.04 stops that sandbox from starting; this setting lets it start.
+      - name: Let Codex's sandbox start
+        if: matrix.reviewer == 'codex'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Review, with one key and no way to write or call out
         env:
           REVIEWER: ${{ matrix.reviewer }}
           ANTHROPIC_API_KEY: ${{ matrix.reviewer == 'claude' && secrets.ANTHROPIC_API_KEY || '' }}

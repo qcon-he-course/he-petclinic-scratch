@@ -38,7 +38,7 @@ public class PetClinicConcurrencyTests {
 	private RestTemplateBuilder restTemplateBuilder;
 
 	@Test
-	public void testDuplicatePetNameRaceConditionIsBlocked() throws Exception {
+	public void twoSimultaneousAddsWithTheSameName() throws Exception {
 		int ownerId = 1;
 		Optional<Owner> initialOwnerOpt = ownerRepository.findById(ownerId);
 		assertThat(initialOwnerOpt).isPresent();

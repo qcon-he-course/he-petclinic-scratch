@@ -105,7 +105,7 @@ class PetControllerCharacterizationTests {
 	// ---- create form ----
 
 	@Test
-	void createSavesOwnerWithNewPetAndFlashesMessage() throws Exception {
+	void aValidPetIsAdded() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "Betty")
 				.param("type", "hamster")
@@ -123,7 +123,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createAcceptsBirthDateOfToday() throws Exception {
+	void todayIsAcceptedOnTheAddForm() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "Betty")
 				.param("type", "hamster")
@@ -132,7 +132,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createRejectsBirthDateOfTomorrowWithCodeOnlyAndDoesNotSave() throws Exception {
+	void aFutureDateIsRejectedOnTheAddForm() throws Exception {
 		MvcResult result = mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "Betty")
 				.param("type", "hamster")
@@ -152,7 +152,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createMissingBirthDateIsRequired() throws Exception {
+	void emptyBirthDateOnTheAddForm() throws Exception {
 		mockMvc.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "Betty").param("type", "hamster"))
 			.andExpect(status().isOk())
 			.andExpect(model().errorCount(1))
@@ -160,7 +160,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createDuplicateNameIsCaseInsensitive() throws Exception {
+	void addingAPetWhoseNameDiffersOnlyInCase() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "PETTY")
 				.param("type", "hamster")
@@ -185,7 +185,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createBlankNameReportsOnlyRequiredNotDuplicate() throws Exception {
+	void blankNameOnTheAddForm() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "")
 				.param("type", "hamster")
@@ -195,7 +195,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createNameOf30CharsAccepted() throws Exception {
+	void thirtyCharactersIsAccepted() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "A".repeat(30))
 				.param("type", "hamster")
@@ -204,7 +204,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createNameOf31CharsRejectedWithSize() throws Exception {
+	void thirtyOneCharactersIsRejectedOnTheAddForm() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "A".repeat(31))
 				.param("type", "hamster")
@@ -237,7 +237,33 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createUnparseableBirthDateReportsTypeMismatchAndRequired() throws Exception {
+	void threeErrorsOnTheAddForm() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "petty")
+				.param("birthDate", LocalDate.now().plusDays(1).toString()))
+			.andExpect(status().isOk())
+			.andExpect(view().name(FORM))
+			.andExpect(model().errorCount(3))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "type", "required"))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "name", "duplicate"))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "birthDate", "typeMismatch.birthDate"));
+		verify(owners, never()).saveAndFlush(any());
+	}
+
+	@Test
+	void unknownTypeOnTheAddForm() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "Betty")
+				.param("type", "lizard")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().isOk())
+			.andExpect(view().name(FORM))
+			.andExpect(model().attributeHasFieldErrors("pet", "type"));
+		verify(owners, never()).saveAndFlush(any());
+	}
+
+	@Test
+	void aMalformedDateIsRejected() throws Exception {
 		MvcResult result = mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "Betty")
 				.param("type", "hamster")
@@ -265,7 +291,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createUniqueViolationMessageMatchedCaseInsensitively() throws Exception {
+	void theConstraintIsReportedAsADuplicateNameOnTheAddForm() throws Exception {
 		given(owners.saveAndFlush(any(Owner.class)))
 			.willThrow(new DataIntegrityViolationException("Duplicate key: UNIQUE_OWNER_PET_NAME"));
 		mockMvc
@@ -278,7 +304,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void createOtherIntegrityViolationIsRethrown() {
+	void anotherIntegrityViolationOnTheAddForm() {
 		given(owners.saveAndFlush(any(Owner.class))).willThrow(new DataIntegrityViolationException("fk_type"));
 		assertThatThrownBy(() -> mockMvc.perform(post("/owners/{ownerId}/pets/new", OWNER_ID).param("name", "Betty")
 			.param("type", "hamster")
@@ -288,7 +314,7 @@ class PetControllerCharacterizationTests {
 	// ---- edit form ----
 
 	@Test
-	void editUpdatesExistingPetAndFlashesMessage() throws Exception {
+	void aValidEditIsSavedToTheSamePet() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, PETTY_ID).param("name", "Betty")
 				.param("type", "hamster")
@@ -306,7 +332,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editCopiesNameBirthDateAndTypeOntoOwnersPetWhenInstancesDiffer() throws Exception {
+	void aValidEditIsSavedToTheSamePetWhenInstancesDiffer() throws Exception {
 		given(this.owners.findById(OWNER_ID)).willAnswer(invocation -> {
 			Owner fresh = new Owner();
 			Pet freshPetty = new Pet();
@@ -341,7 +367,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editAcceptsBirthDateOfToday() throws Exception {
+	void todayIsAcceptedOnTheEditForm() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, PETTY_ID).param("name", "Betty")
 				.param("type", "hamster")
@@ -350,7 +376,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editMissingBirthDateIsRequiredAndNotSaved() throws Exception {
+	void emptyBirthDateOnTheEditForm() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, PETTY_ID).param("name", "Betty")
 				.param("type", "hamster")
@@ -363,7 +389,20 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editDuplicateNameOfOtherPetIsCaseInsensitive() throws Exception {
+	void twoErrorsOnTheEditForm() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, DOGGY_ID).param("name", "petty")
+				.param("type", "hamster"))
+			.andExpect(status().isOk())
+			.andExpect(view().name(FORM))
+			.andExpect(model().errorCount(2))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "birthDate", "required"))
+			.andExpect(model().attributeHasFieldErrorCode("pet", "name", "duplicate"));
+		verify(owners, never()).saveAndFlush(any());
+	}
+
+	@Test
+	void renamingAPetToAnotherPetsName() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, DOGGY_ID).param("name", "PETTY")
 				.param("type", "hamster")
@@ -375,7 +414,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editOwnNameInDifferentCaseIsAllowed() throws Exception {
+	void renamingAPetToItsOwnNameInAnotherCase() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, PETTY_ID).param("name", "PETTY")
 				.param("birthDate", "2015-02-12"))
@@ -384,7 +423,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editNameOf31CharsRejectedWithSize() throws Exception {
+	void thirtyOneCharactersIsRejectedOnTheEditForm() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, PETTY_ID).param("name", "A".repeat(31))
 				.param("birthDate", "2015-02-12"))
@@ -394,7 +433,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editBlankNameReportsOnlyRequiredNotDuplicate() throws Exception {
+	void blankNameOnTheEditForm() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, PETTY_ID).param("name", "")
 				.param("birthDate", "2015-02-12"))
@@ -416,7 +455,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editIgnoresSubmittedId() throws Exception {
+	void anIdParameterOnTheEditForm() throws Exception {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, PETTY_ID).param("id", "99")
 				.param("name", "Betty")
@@ -439,7 +478,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editUniqueViolationMessageMatchedCaseInsensitively() throws Exception {
+	void theConstraintIsReportedAsADuplicateNameOnTheEditForm() throws Exception {
 		given(owners.saveAndFlush(any(Owner.class)))
 			.willThrow(new DataIntegrityViolationException("Duplicate key: UNIQUE_OWNER_PET_NAME"));
 		mockMvc
@@ -451,7 +490,7 @@ class PetControllerCharacterizationTests {
 	}
 
 	@Test
-	void editOtherIntegrityViolationIsRethrown() {
+	void anotherIntegrityViolationOnTheEditForm() {
 		given(owners.saveAndFlush(any(Owner.class))).willThrow(new DataIntegrityViolationException("fk_type"));
 		assertThatThrownBy(() -> mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", OWNER_ID, PETTY_ID).param("name", "Betty")

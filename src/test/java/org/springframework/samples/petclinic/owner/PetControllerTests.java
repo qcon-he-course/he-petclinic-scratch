@@ -134,7 +134,7 @@ class PetControllerTests {
 		}
 
 		@Test
-		void processCreationFormWithMissingPetType() throws Exception {
+		void noTypeOnTheAddForm() throws Exception {
 			mockMvc
 				.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Betty")
 					.param("birthDate", "2015-02-12"))
@@ -242,7 +242,7 @@ class PetControllerTests {
 		}
 
 		@Test
-		void processUpdateFormRejectsFutureBirthDate() throws Exception {
+		void aFutureDateIsRejectedOnTheEditForm() throws Exception {
 			String futureBirthDate = LocalDate.now().plusMonths(1).toString();
 
 			mockMvc

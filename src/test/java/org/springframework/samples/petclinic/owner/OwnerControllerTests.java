@@ -19,8 +19,11 @@ package org.springframework.samples.petclinic.owner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledInNativeImage;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.support.ResourceBundleMessageSource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -29,10 +32,18 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.TimeZone;
+import java.util.regex.Pattern;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasItem;
@@ -293,6 +304,75 @@ class OwnerControllerTests {
 			.andExpect(model().attribute("owner",
 					hasProperty("pets", hasItem(hasProperty("visits", hasSize(greaterThan(0)))))))
 			.andExpect(view().name("owners/ownerDetails"));
+	}
+
+	private String ownerPageWithPetBornOn(LocalDate birthDate, String lang) throws Exception {
+		Owner owner = george();
+		owner.getPet("Max").setBirthDate(birthDate);
+		given(this.owners.findById(TEST_OWNER_ID)).willReturn(Optional.of(owner));
+		return mockMvc.perform(get("/owners/{ownerId}", TEST_OWNER_ID).param("lang", lang))
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString(StandardCharsets.UTF_8);
+	}
+
+	private static String birthDateThenAge(LocalDate birthDate, String age) {
+		String date = (birthDate != null) ? birthDate.toString() : "";
+		return "<dd>" + Pattern.quote(date) + "</dd>\\s*<dt>Age</dt>\\s*<dd>" + Pattern.quote(age) + "</dd>";
+	}
+
+	@Test
+	void theAgeIsShownDirectlyAfterTheBirthDate() throws Exception {
+		LocalDate birthDate = LocalDate.now().minusYears(3);
+		String page = ownerPageWithPetBornOn(birthDate, "en");
+		assertThat(page).containsPattern(birthDateThenAge(birthDate, "3 years") + "\\s*<dt>Type</dt>");
+	}
+
+	@Test
+	void aPetWithNoAgeStillShowsTheLabel() throws Exception {
+		String page = ownerPageWithPetBornOn(null, "en");
+		assertThat(page).containsPattern(birthDateThenAge(null, "") + "\\s*<dt>Type</dt>");
+	}
+
+	@Test
+	void todayIsTheDateInTheServersTimeZone() throws Exception {
+		Instant now = Instant.now();
+		LocalDate utcDate = LocalDate.ofInstant(now, ZoneOffset.UTC);
+		ZoneId ahead = ZoneId.of("Pacific/Kiritimati");
+		ZoneId zone = LocalDate.ofInstant(now, ahead).isAfter(utcDate) ? ahead : ZoneId.of("Pacific/Pago_Pago");
+		LocalDate serverDate = LocalDate.ofInstant(now, zone);
+		assertThat(serverDate).isNotEqualTo(utcDate);
+		boolean serverDateIsLater = serverDate.isAfter(utcDate);
+		LocalDate laterDate = serverDateIsLater ? serverDate : utcDate;
+		TimeZone previous = TimeZone.getDefault();
+		try {
+			TimeZone.setDefault(TimeZone.getTimeZone(zone));
+			String page = ownerPageWithPetBornOn(laterDate, "en");
+			assertThat(page).containsPattern(birthDateThenAge(laterDate, serverDateIsLater ? "under a month" : ""));
+		}
+		finally {
+			TimeZone.setDefault(previous);
+		}
+	}
+
+	private static String ownerInformationIn(String lang) {
+		ResourceBundleMessageSource source = new ResourceBundleMessageSource();
+		source.setBasename("messages/messages");
+		source.setDefaultEncoding("UTF-8");
+		source.setFallbackToSystemLocale(false);
+		return source.getMessage("ownerInformation", null, Locale.forLanguageTag(lang));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "de", "es", "fa", "hi", "ja", "ko", "pt", "ru", "tr" })
+	void theAgeTextsInTheOtherLanguages(String lang) throws Exception {
+		String heading = ownerInformationIn(lang);
+		assertThat(heading).isNotEqualTo(ownerInformationIn("en"));
+		LocalDate birthDate = LocalDate.now().minusYears(3);
+		String page = ownerPageWithPetBornOn(birthDate, lang);
+		assertThat(page).contains("<h2>" + heading + "</h2>");
+		assertThat(page).containsPattern(birthDateThenAge(birthDate, "3 years"));
 	}
 
 	@Test

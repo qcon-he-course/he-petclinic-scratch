@@ -1,27 +1,55 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["type", "agrees", "facts", "summary"],
+  "required": [
+    "type",
+    "agrees",
+    "facts",
+    "summary"
+  ],
   "properties": {
     "type": {
       "type": "string",
-      "enum": ["behavior-change", "defect", "technical"],
+      "enum": [
+        "behavior-change",
+        "defect",
+        "technical"
+      ],
       "description": "The type the facts support"
     },
-    "agrees": { "type": "boolean", "description": "True when that is the type the requester picked" },
+    "agrees": {
+      "type": "boolean",
+      "description": "True when that is the type the requester picked"
+    },
     "facts": {
       "type": "array",
       "description": "The facts behind the view, each with the place that shows it. At least one, at most six",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["fact", "where"],
+        "required": [
+          "fact",
+          "where",
+          "quote"
+        ],
         "properties": {
-          "fact": { "type": "string" },
-          "where": { "type": "string", "description": "path, path:line or path:line-line, relative to the repository's root" }
+          "fact": {
+            "type": "string"
+          },
+          "where": {
+            "type": "string",
+            "description": "path, path:line or path:line-line, relative to the repository's root"
+          },
+          "quote": {
+            "type": "string",
+            "description": "Two to fifteen words copied exactly from the place cited, as proof that it says this"
+          }
         }
       }
     },
-    "summary": { "type": "string", "description": "One or two sentences for the person who admits" }
+    "summary": {
+      "type": "string",
+      "description": "One or two sentences for the person who admits"
+    }
   }
 }

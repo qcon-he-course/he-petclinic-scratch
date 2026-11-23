@@ -6,10 +6,10 @@
 #
 # <stage>/<box> names the agent: <line>/<stage>/<box>.md is its skill and
 # <line>/<stage>/<box>.schema.json the shape of its result. <inputs dir> holds what
-# the agent is given besides the clone (item.json, items.json); this script adds
-# files.txt, every file of the checkout. <out dir> gets prompt.txt, result.json,
-# stderr.txt, <box>.by (what ran) and then, from lib/check.py, <box>.json (the
-# result) or <box>.why.
+# the agent is given besides the clone (item.json and what the stage adds); this
+# script adds files.txt, every file of the checkout. <out dir> gets prompt.txt,
+# result.json, stderr.txt, <box>.ran.json (the tool, the model, the turns, the cost,
+# the seconds) and then, from lib/check.py, <box>.json (the result) or <box>.why.
 #
 # AGENT_MODEL (Claude: claude-sonnet-5-5; Codex: gpt-6.1-sol), AGENT_MAX_TURNS (40),
 # AGENT_BUDGET_USD (1), AGENT_TIME_CAP in seconds (600).
@@ -36,17 +36,19 @@ case "$name" in *[!a-z/-]*) echo "agent: <stage>/<box> is lower-case letters and
 box="${name##*/}"
 skill="$line/$name.md"; schema="$line/$name.schema.json"
 [ -f "$skill" ] && [ -f "$schema" ] || { echo "agent: no skill or no schema for $name" >&2; exit 2; }
-rm -f "$out/result.json" "$out/$box.json" "$out/$box.why"
+rm -f "$out/result.json" "$out/$box.json" "$out/$box.why" "$out/$box.ran.json"
 
 git -C "$clone" ls-files | sort > "$inputs/files.txt"
+given="$(cd "$inputs" && find . -type f | sed 's|^\./||' | sort | paste -sd, - | sed 's/,/, /g')"
 cat > "$out/prompt.txt" <<P
-Do your work on the item in $inputs/item.json. The other items on the line are in $inputs/items.json. This folder is the checkout of the source repository; every file in it is listed in $inputs/files.txt. Read the files you need by path. Return the result as the structured output.
+Do your work on the item in $inputs/item.json. The inputs folder, $inputs, holds: $given. This folder is the checkout of the source repository; every file in it is listed in $inputs/files.txt. Read the files you need by path. Return the result as the structured output.
 P
 
 cd "$clone" || exit 1
+start="$(date +%s)"
 case "$vendor" in
   claude)
-    echo "Claude Code, ${AGENT_MODEL:-claude-sonnet-5-5}" > "$out/$box.by"
+    tool="Claude Code"; model="${AGENT_MODEL:-claude-sonnet-5-5}"
     if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
       echo "agent: ANTHROPIC_API_KEY is not set; --bare reads no other sign-in" > "$out/stderr.txt"
     else
@@ -66,7 +68,7 @@ case "$vendor" in
     fi
     ;;
   codex)
-    echo "Codex, ${AGENT_MODEL:-gpt-6.1-sol}" > "$out/$box.by"
+    tool="Codex"; model="${AGENT_MODEL:-gpt-6.1-sol}"
     if [ -z "${CODEX_API_KEY:-}" ]; then
       echo "agent: CODEX_API_KEY is not set" > "$out/stderr.txt"
     else
@@ -86,5 +88,6 @@ case "$vendor" in
   *) echo "agent: the vendor is claude or codex" >&2; exit 2 ;;
 esac
 tail -c 1500 "$out/stderr.txt" >&2 2> /dev/null || true
+python3 -B "$here/ran.py" "$tool" "$model" "$(( $(date +%s) - start ))" "$out/result.json" "$out/$box.ran.json"
 # The agent's exit code decides nothing: only an output that passes the check is a result.
 python3 -B "$here/check.py" "$box" "$schema" "$out/result.json" "$clone" "$inputs" "$out"

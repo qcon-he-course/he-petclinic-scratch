@@ -13,10 +13,13 @@ limit, returned no structured output, broke the schema or cited something that i
 not there all exit 1. The gate reads a missing result as a failed check.
 
 Beyond the schema, a result is held to what a script can check:
-  - every "where" names a file of the clone, and a line that file has;
+  - every "where" names a file of the clone, and lines that file has;
+  - every "quote" is in the place its "where" names, word for word;
   - every duplicate names an item that is on the line;
   - the lists and the texts have a size a person can read;
-  - the result does not contradict itself (one idea and two ideas; agrees and differs).
+  - the result does not contradict itself (one idea and two ideas; agrees and differs);
+  - a pin names a test that exists or a test the result itself writes, in a new file
+    under src/test/java, labelled observed.
 """
 import os
 import re
@@ -26,6 +29,9 @@ from common import dump, load
 
 WHERE = re.compile(r"([^:\s]+)(?::(\d+)(?:-(\d+))?)?")
 TEXT_LIMIT, LIST_LIMIT = 700, 12
+LIMITS = {"content": 30000}  # a key whose text may be longer: the source of a test file
+TESTS = "src/test/java/"
+PIN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*#[A-Za-z_][A-Za-z0-9_]*")
 
 
 def schema_problems(value, schema, at="result"):
@@ -51,8 +57,9 @@ def schema_problems(value, schema, at="result"):
             return [f"{at} is not text"]
         if not value.strip():
             return [f"{at} is empty"]
-        if len(value) > TEXT_LIMIT:
-            return [f"{at} has {len(value)} characters; the limit is {TEXT_LIMIT}"]
+        limit = LIMITS.get(at.rsplit(".", 1)[-1], TEXT_LIMIT)
+        if len(value) > limit:
+            return [f"{at} has {len(value)} characters; the limit is {limit}"]
         if "enum" in schema and value not in schema["enum"]:
             return [f"{at}: {value!r} is not one of {schema['enum']}"]
         return []
@@ -85,11 +92,84 @@ def where_problem(where, clone):
     return None
 
 
+def quote_problem(where, quote, clone):
+    """None when <quote> stands in the place <where> names, word for word; spacing is not compared."""
+    m = WHERE.fullmatch(where.strip())
+    full = os.path.join(clone, os.path.normpath(m.group(1)))
+    if os.path.isdir(full):
+        return f"{where!r} is a folder: a quote needs a file"
+    with open(full, encoding="utf-8", errors="replace") as f:
+        lines = f.read().split("\n")
+    if m.group(2):
+        first, last = int(m.group(2)), int(m.group(3) or m.group(2))
+        lines = lines[first - 1:last]
+    squeeze = lambda t: " ".join(t.split())
+    words = squeeze(quote)
+    if len(words.split()) < 2:
+        return f"the quote for {where!r} is shorter than two words"
+    if words not in squeeze(" ".join(lines)):
+        return f"the quote {words[:60]!r} is not at {where!r}"
+    return None
+
+
+def pin_problems(r, clone):
+    out = []
+    written = {f["path"]: f["content"] for f in r["files"]}
+    if len(written) != len(r["files"]):
+        out.append("a file is written twice")
+    for path, content in written.items():
+        norm = os.path.normpath(path)
+        if norm != path or not path.startswith(TESTS) or not path.endswith(".java"):
+            out.append(f"{path!r} is not a Java file under {TESTS}")
+        elif os.path.exists(os.path.join(clone, path)):
+            out.append(f"{path!r} exists: a pin is written in a new file, and no existing file changes")
+        elif '@Tag("observed")' not in content:
+            out.append(f"{path!r} has no test labelled @Tag(\"observed\")")
+    if not r["pins"]:
+        out.append("no pins: the stage records at least one behavior")
+    seen = set()
+    for pin in r["pins"]:
+        if not PIN.fullmatch(pin["test"]):
+            out.append(f"pin {pin['test']!r} is not written as TestClass#method")
+            continue
+        if pin["test"] in seen:
+            out.append(f"pin {pin['test']} is named twice")
+        seen.add(pin["test"])
+        cls, method = pin["test"].split("#")
+        if os.path.basename(pin["file"]) != f"{cls}.java":
+            out.append(f"pin {pin['test']}: the file {pin['file']!r} is not {cls}.java")
+            continue
+        if pin["kind"] == "written":
+            source = written.get(pin["file"])
+            if source is None:
+                out.append(f"pin {pin['test']} is written, and the result writes no file {pin['file']!r}")
+                continue
+        else:
+            full = os.path.join(clone, os.path.normpath(pin["file"]))
+            if not pin["file"].startswith(TESTS) or not os.path.isfile(full):
+                out.append(f"pin {pin['test']} cites {pin['file']!r}, which is not a test file of the repository")
+                continue
+            with open(full, encoding="utf-8", errors="replace") as f:
+                source = f.read()
+        if not re.search(r"\bvoid\s+" + re.escape(method) + r"\s*\(", source):
+            out.append(f"pin {pin['test']}: {pin['file']} has no test method {method}")
+    for path in written:
+        if not any(p["kind"] == "written" and p["file"] == path for p in r["pins"]):
+            out.append(f"{path!r} is written and no pin names it")
+    for cls in r["target_classes"]:
+        if not cls.startswith("src/main/java/") or not cls.endswith(".java") or not os.path.isfile(os.path.join(clone, os.path.normpath(cls))):
+            out.append(f"{cls!r} is not a production class of the repository")
+    return out
+
+
 def box_problems(box, r, clone, inputs):
     out = []
-    cited = []
-    if box == "intake-agent":
-        cited = [e["where"] for k in ("terms", "related", "reversed_decisions") for e in r[k]]
+    quoted = []
+    if box == "pin-agent":
+        quoted = [(e["where"], e["quote"]) for k in ("pins", "suspects") for e in r[k]]
+        out += pin_problems(r, clone)
+    elif box == "intake-agent":
+        quoted = [(e["where"], e["quote"]) for k in ("terms", "related", "reversed_decisions") for e in r[k]]
         if r["one_idea"] and len(r["ideas"]) != 1:
             out.append("one_idea is true, so ideas holds the one idea, restated")
         if not r["one_idea"] and len(r["ideas"]) < 2:
@@ -97,7 +177,7 @@ def box_problems(box, r, clone, inputs):
         on_line = {i["number"] for i in load(os.path.join(inputs, "items.json"))}
         out += [f"duplicate #{d['item']} is not an item on the line" for d in r["duplicates"] if d["item"] not in on_line]
     elif box == "classifier":
-        cited = [f["where"] for f in r["facts"]]
+        quoted = [(f["where"], f["quote"]) for f in r["facts"]]
         item = load(os.path.join(inputs, "item.json"))
         if not r["facts"]:
             out.append("no facts: a view of the type comes with the facts behind it")
@@ -105,7 +185,10 @@ def box_problems(box, r, clone, inputs):
             out.append(f"agrees is {r['agrees']}, the requester picked {item['type']} and the result says {r['type']}")
     else:
         out.append(f"no check is written for the box {box!r}")
-    out += [p for p in (where_problem(w, clone) for w in cited) if p]
+    for where, quote in quoted:
+        problem = where_problem(where, clone) or quote_problem(where, quote, clone)
+        if problem:
+            out.append(problem)
     return out
 
 

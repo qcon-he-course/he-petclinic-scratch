@@ -58,6 +58,9 @@ def main(argv):
         effects["comments"] = [f"### Not admitted\n\n{words}\n\nThe label `admit` has been taken off again."]
     dump(out, effects)
     print("admitted=" + ("yes" if ok else "no"))
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+            f.write("admitted=" + ("yes" if ok else "no") + "\n")
     return 0
 
 

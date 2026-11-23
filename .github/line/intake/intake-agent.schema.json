@@ -1,13 +1,29 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["one_idea", "ideas", "terms", "duplicates", "related", "reversed_decisions", "questions_for_requester", "open_points", "gaps", "summary"],
+  "required": [
+    "one_idea",
+    "ideas",
+    "terms",
+    "duplicates",
+    "related",
+    "reversed_decisions",
+    "questions_for_requester",
+    "open_points",
+    "gaps",
+    "summary"
+  ],
   "properties": {
-    "one_idea": { "type": "boolean", "description": "True when the item states exactly one idea" },
+    "one_idea": {
+      "type": "boolean",
+      "description": "True when the item states exactly one idea"
+    },
     "ideas": {
       "type": "array",
       "description": "When one_idea is true: the one idea, restated in the team's words. When false: each separate idea, one entry each",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "terms": {
       "type": "array",
@@ -15,11 +31,29 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["word", "team_word", "where"],
+        "required": [
+          "word",
+          "team_word",
+          "where",
+          "quote"
+        ],
         "properties": {
-          "word": { "type": "string", "description": "The requester's word" },
-          "team_word": { "type": "string", "description": "The team's word; the same word when they agree" },
-          "where": { "type": "string", "description": "path, path:line or path:line-line" }
+          "word": {
+            "type": "string",
+            "description": "The requester's word"
+          },
+          "team_word": {
+            "type": "string",
+            "description": "The team's word; the same word when they agree"
+          },
+          "where": {
+            "type": "string",
+            "description": "path, path:line or path:line-line"
+          },
+          "quote": {
+            "type": "string",
+            "description": "Two to fifteen words copied exactly from the place cited, as proof that it says this"
+          }
         }
       }
     },
@@ -29,10 +63,18 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["item", "why"],
+        "required": [
+          "item",
+          "why"
+        ],
         "properties": {
-          "item": { "type": "integer", "description": "The other item's number, from items.json" },
-          "why": { "type": "string" }
+          "item": {
+            "type": "integer",
+            "description": "The other item's number, from items.json"
+          },
+          "why": {
+            "type": "string"
+          }
         }
       }
     },
@@ -42,10 +84,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["where", "why"],
+        "required": [
+          "where",
+          "why",
+          "quote"
+        ],
         "properties": {
-          "where": { "type": "string", "description": "path, path:line or path:line-line" },
-          "why": { "type": "string" }
+          "where": {
+            "type": "string",
+            "description": "path, path:line or path:line-line"
+          },
+          "why": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string",
+            "description": "Two to fifteen words copied exactly from the place cited, as proof that it says this"
+          }
         }
       }
     },
@@ -55,29 +110,54 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["decision", "where", "why"],
+        "required": [
+          "decision",
+          "where",
+          "why",
+          "quote"
+        ],
         "properties": {
-          "decision": { "type": "string" },
-          "where": { "type": "string", "description": "path, path:line or path:line-line" },
-          "why": { "type": "string" }
+          "decision": {
+            "type": "string"
+          },
+          "where": {
+            "type": "string",
+            "description": "path, path:line or path:line-line"
+          },
+          "why": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string",
+            "description": "Two to fifteen words copied exactly from the place cited, as proof that it says this"
+          }
         }
       }
     },
     "questions_for_requester": {
       "type": "array",
       "description": "Only what must be answered before the item states one idea a person can admit; empty when nothing is missing",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "open_points": {
       "type": "array",
       "description": "Points for the person who admits the item to know. Not questions the line needs answered now",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "gaps": {
       "type": "array",
       "description": "What the constitution lacks for this read, for example no glossary; empty when it lacks nothing",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
-    "summary": { "type": "string", "description": "Two sentences at most, for the person who admits" }
+    "summary": {
+      "type": "string",
+      "description": "Two sentences at most, for the person who admits"
+    }
   }
 }

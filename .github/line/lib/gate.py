@@ -5,8 +5,8 @@
 
 <results dir> holds, for each box (intake-agent, intake-check, classifier), either
 <box>.json, the result lib/check.py accepted, or <box>.why, the reason there is none.
-A box with neither file left nothing, and that is also no result. <box>.by, when
-present, says what ran the box. RUN_ID and RUN_URL name the workflow run.
+A box with neither file left nothing, and that is also no result. <box>.ran.json,
+when present, says what ran the box. RUN_ID and RUN_URL name the workflow run.
 
 The policy, in order:
   stuck      a box left no result. A missing result is a failed check: the item is
@@ -22,7 +22,7 @@ Writes the effects (comments, labels, assignee) for lib/apply.py and prints the 
 import os
 import sys
 
-from common import BOXES, BOX_NAMES, clean, code, data_block, dump, load, text
+from common import BOXES, BOX_NAMES, clean, code, data_block, dump, foot, load, ran_line, text
 
 
 def bullets(lines, none="none."):
@@ -71,13 +71,12 @@ def render_classifier(r, item, others, policy=None):
 
 
 def comment(box, results, whys, by, item, others, policy, run, url):
-    ran = f"[run {run}]({url})" if url else f"run {run}"
-    foot = f"<sub>Intake · {by.get(box, 'a job, no model')} · {ran}</sub>"
+    end = foot("Intake", ran_line(by.get(box)), run, url)
     if box not in results:
-        return f"### {BOX_NAMES[box]}\n\n**No result.** {clean(whys[box], 900)}\n\n{foot}"
+        return f"### {BOX_NAMES[box]}\n\n**No result.** {clean(whys[box], 900)}\n\n{end}"
     body = {"intake-agent": render_intake_agent, "intake-check": render_intake_check,
             "classifier": lambda r, i, o: render_classifier(r, i, o, policy)}[box](results[box], item, others)
-    return f"### {BOX_NAMES[box]}\n\n{body}\n\n{foot}\n{data_block(results[box], 'intake', box, run)}"
+    return f"### {BOX_NAMES[box]}\n\n{body}\n\n{end}\n{data_block(results[box], 'intake', box, run, by.get(box))}"
 
 
 def decide(item, results, whys, policy, people):
@@ -132,18 +131,18 @@ def main(argv):
         os.path.join(os.path.dirname(argv[0]), "items.json")) else 0
     results, whys, by = {}, {}, {}
     for box in BOXES:
-        good, bad, ran = (os.path.join(folder, f"{box}.{ext}") for ext in ("json", "why", "by"))
+        good, bad, ran = (os.path.join(folder, f"{box}.{ext}") for ext in ("json", "why", "ran.json"))
         if os.path.isfile(good):
             results[box] = load(good)
         else:
             whys[box] = text(bad).strip() if os.path.isfile(bad) else "The box's job left nothing: it did not run, or it failed before the check."
         if os.path.isfile(ran):
-            by[box] = " ".join(text(ran).split())[:80]
+            by[box] = load(ran)
     outcome, role, words = decide(item, results, whys, policy, people)
     comments = [comment(b, results, whys, by, item, others, policy, run, url) for b in BOXES]
     decision = {"outcome": outcome, "role": role, "type": item["type"]}
     comments.append(f"### {BOX_NAMES['admission-gate']}\n\n{words}\n\n"
-                    f"<sub>Intake · a policy, no model · run {run}</sub>\n{data_block(decision, 'intake', 'admission-gate', run)}")
+                    f"{foot('Intake', 'a policy, no model', run, url)}\n{data_block(decision, 'intake', 'admission-gate', run)}")
     effects = {"comments": comments, "add": [], "remove": ["stuck", "returned", "called:product-owner", "called:tech-lead"], "assign": []}
     if outcome == "admitted":
         effects.update(add=["admitted", "stage:understand"], remove=effects["remove"] + ["stage:intake"], assign=people[role][:1])

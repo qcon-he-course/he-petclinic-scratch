@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""check: accept a headless agent's output as a box's result, or fail closed. No model.
+
+  check.py <box> <schema.json> <raw result.json> <clone> <inputs dir> <out dir>
+
+<raw result.json> is what `claude -p --output-format json --json-schema ...` printed
+(the result is in its "structured_output"), or the file `codex exec --output-schema
+... -o` wrote (the result is the whole object).
+
+Exit 0: <out dir>/<box>.json holds the result. Exit 1: <out dir>/<box>.why holds the
+reason and there is no result. A run that ended in an error, hit its turn or budget
+limit, returned no structured output, broke the schema or cited something that is
+not there all exit 1. The gate reads a missing result as a failed check.
+
+Beyond the schema, a result is held to what a script can check:
+  - every "where" names a file of the clone, and a line that file has;
+  - every duplicate names an item that is on the line;
+  - the lists and the texts have a size a person can read;
+  - the result does not contradict itself (one idea and two ideas; agrees and differs).
+"""
+import os
+import re
+import sys
+
+from common import dump, load
+
+WHERE = re.compile(r"([^:\s]+)(?::(\d+)(?:-(\d+))?)?")
+TEXT_LIMIT, LIST_LIMIT = 700, 12
+
+
+def schema_problems(value, schema, at="result"):
+    """A small reading of JSON Schema: type, required, no other keys, enum, items."""
+    kind = schema.get("type")
+    if kind == "object":
+        if not isinstance(value, dict):
+            return [f"{at} is not an object"]
+        out = [f"{at}: missing key {k}" for k in schema.get("required", []) if k not in value]
+        out += [f"{at}: unknown key {k}" for k in value if k not in schema.get("properties", {})]
+        for k, sub in schema.get("properties", {}).items():
+            if k in value:
+                out += schema_problems(value[k], sub, f"{at}.{k}")
+        return out
+    if kind == "array":
+        if not isinstance(value, list):
+            return [f"{at} is not a list"]
+        if len(value) > LIST_LIMIT:
+            return [f"{at} has {len(value)} entries; the limit is {LIST_LIMIT}"]
+        return [p for i, v in enumerate(value) for p in schema_problems(v, schema.get("items", {}), f"{at}[{i + 1}]")]
+    if kind == "string":
+        if not isinstance(value, str):
+            return [f"{at} is not text"]
+        if not value.strip():
+            return [f"{at} is empty"]
+        if len(value) > TEXT_LIMIT:
+            return [f"{at} has {len(value)} characters; the limit is {TEXT_LIMIT}"]
+        if "enum" in schema and value not in schema["enum"]:
+            return [f"{at}: {value!r} is not one of {schema['enum']}"]
+        return []
+    if kind == "boolean":
+        return [] if isinstance(value, bool) else [f"{at} is not true or false"]
+    if kind == "integer":
+        return [] if isinstance(value, int) and not isinstance(value, bool) else [f"{at} is not a whole number"]
+    return [f"{at}: the schema names no type this check reads"]
+
+
+def where_problem(where, clone):
+    """None when <where> names a file of the clone (and lines it has), else what is wrong."""
+    m = WHERE.fullmatch(where.strip())
+    if not m:
+        return f"{where!r} is not written as path, path:line or path:line-line"
+    path = os.path.normpath(m.group(1))
+    if path.startswith(("..", "/")) or path == ".git" or path.startswith(".git/"):
+        return f"{where!r} is outside the repository"
+    full = os.path.join(clone, path)
+    if os.path.isdir(full):
+        return None if not m.group(2) else f"{where!r}: a folder has no lines"
+    if not os.path.isfile(full):
+        return f"{where!r}: no such file in the repository"
+    if m.group(2):
+        with open(full, encoding="utf-8", errors="replace") as f:
+            lines = sum(1 for _ in f)
+        last = int(m.group(3) or m.group(2))
+        if int(m.group(2)) < 1 or last < int(m.group(2)) or last > lines:
+            return f"{where!r}: the file has {lines} lines"
+    return None
+
+
+def box_problems(box, r, clone, inputs):
+    out = []
+    cited = []
+    if box == "intake-agent":
+        cited = [e["where"] for k in ("terms", "related", "reversed_decisions") for e in r[k]]
+        if r["one_idea"] and len(r["ideas"]) != 1:
+            out.append("one_idea is true, so ideas holds the one idea, restated")
+        if not r["one_idea"] and len(r["ideas"]) < 2:
+            out.append("one_idea is false, so ideas holds each idea, at least two")
+        on_line = {i["number"] for i in load(os.path.join(inputs, "items.json"))}
+        out += [f"duplicate #{d['item']} is not an item on the line" for d in r["duplicates"] if d["item"] not in on_line]
+    elif box == "classifier":
+        cited = [f["where"] for f in r["facts"]]
+        item = load(os.path.join(inputs, "item.json"))
+        if not r["facts"]:
+            out.append("no facts: a view of the type comes with the facts behind it")
+        if r["agrees"] != (r["type"] == item["type"]):
+            out.append(f"agrees is {r['agrees']}, the requester picked {item['type']} and the result says {r['type']}")
+    else:
+        out.append(f"no check is written for the box {box!r}")
+    out += [p for p in (where_problem(w, clone) for w in cited) if p]
+    return out
+
+
+def extract(result):
+    """(result, reason it cannot be used). Claude Code wraps the result; Codex writes it bare."""
+    if not isinstance(result, dict):
+        return None, "the output is not a JSON object"
+    if "type" in result and "subtype" in result:  # Claude Code's result message
+        if result.get("is_error") or result.get("subtype") != "success":
+            said = " ".join(str(result.get("result") or "").split())[:300]
+            return None, (f"the run did not succeed: subtype {result.get('subtype')!r}, is_error {result.get('is_error')!r}"
+                          + (f"; it said: {said}" if said else ""))
+        if result.get("structured_output") is None:
+            return None, "the run returned no structured output"
+        return result["structured_output"], None
+    return result, None
+
+
+def main(argv):
+    if len(argv) != 6:
+        print(__doc__.split("\n\n")[1], file=sys.stderr)
+        return 2
+    box, schema, raw, clone, inputs, out = argv
+    os.makedirs(out, exist_ok=True)
+    good, bad = os.path.join(out, f"{box}.json"), os.path.join(out, f"{box}.why")
+    for stale in (good, bad):
+        if os.path.exists(stale):
+            os.remove(stale)
+
+    def refuse(why):
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write(why + "\n")
+        print(f"check: no result from {box}: {why}", file=sys.stderr)
+        return 1
+
+    try:
+        result, why = extract(load(raw))
+    except (OSError, ValueError) as e:
+        return refuse(f"the output could not be read ({type(e).__name__})")
+    if why:
+        return refuse(why)
+    problems = schema_problems(result, load(schema))
+    if not problems:
+        problems = box_problems(box, result, clone, inputs)
+    if problems:
+        return refuse("; ".join(problems[:6]) + (f"; and {len(problems) - 6} more" if len(problems) > 6 else ""))
+    dump(good, result)
+    print(f"check: {box} left a result")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

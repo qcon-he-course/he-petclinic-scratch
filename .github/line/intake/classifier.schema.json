@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "agrees", "facts", "summary"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["behavior-change", "defect", "technical"],
+      "description": "The type the facts support"
+    },
+    "agrees": { "type": "boolean", "description": "True when that is the type the requester picked" },
+    "facts": {
+      "type": "array",
+      "description": "The facts behind the view, each with the place that shows it. At least one, at most six",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact", "where"],
+        "properties": {
+          "fact": { "type": "string" },
+          "where": { "type": "string", "description": "path, path:line or path:line-line, relative to the repository's root" }
+        }
+      }
+    },
+    "summary": { "type": "string", "description": "One or two sentences for the person who admits" }
+  }
+}

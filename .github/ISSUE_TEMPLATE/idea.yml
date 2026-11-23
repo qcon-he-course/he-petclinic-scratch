@@ -1,0 +1,34 @@
+name: An idea for the line
+description: State an idea in at least one line. Filing it starts Intake.
+labels: ["line"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One idea per item. One line is enough: the line asks for what is missing.
+        Filing the item starts the intake agent. A person admits the item before any work begins.
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: The idea in your own words. At least one line.
+    validations:
+      required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      description: Your view of what kind of work this is. A second agent checks it, and the person who admits may change it.
+      options:
+        - Behavior change
+        - Defect
+        - Technical
+    validations:
+      required: true
+  - type: input
+    id: proof
+    attributes:
+      label: Proof
+      description: "Optional, for a defect: a branch that carries a failing test, and the test, written as branch:TestClass#method"
+    validations:
+      required: false

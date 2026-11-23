@@ -24,7 +24,7 @@ The workflow is `.github/workflows/line-intake.yml`.
 
 The item's state is its labels: `stage:*`, `type:*`, and one of `called:*`, `returned`, `stuck`, `admitted`. Every result comment ends with the result as data and a marker, `<!-- line:result stage=… box=… run=… -->`, so that later stages can read the item. The data also says what ran the box: the tool, the model, the turns, the cost and the seconds. A stage reads results with `read_results` in `lib/common.py`, which takes them only from comments by `github-actions[bot]`.
 
-Every place an agent cites comes with a quote of two to fifteen words, and `lib/check.py` looks for the quote in the cited lines. A place that is not there, or a quote that is not at that place, voids the whole result.
+Every place an agent cites comes with a quote of at least eight characters, and `lib/check.py` looks for the quote in the cited lines. A place that is not there, or a quote that is not at that place, voids the whole result.
 
 To run Intake again on an item: Actions, "line: intake", Run workflow, with the item's number.
 

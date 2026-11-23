@@ -52,7 +52,7 @@
           },
           "quote": {
             "type": "string",
-            "description": "Two to fifteen words copied exactly from the place cited, as proof that it says this"
+            "description": "Eight to 150 characters copied exactly from the cited lines, code or text, as proof that it says this"
           }
         }
       }
@@ -99,7 +99,7 @@
           },
           "quote": {
             "type": "string",
-            "description": "Two to fifteen words copied exactly from the place cited, as proof that it says this"
+            "description": "Eight to 150 characters copied exactly from the cited lines, code or text, as proof that it says this"
           }
         }
       }
@@ -129,7 +129,7 @@
           },
           "quote": {
             "type": "string",
-            "description": "Two to fifteen words copied exactly from the place cited, as proof that it says this"
+            "description": "Eight to 150 characters copied exactly from the cited lines, code or text, as proof that it says this"
           }
         }
       }

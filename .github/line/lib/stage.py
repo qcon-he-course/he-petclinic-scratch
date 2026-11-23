@@ -5,7 +5,8 @@
 
 <issue.json> and <comments.json> are the issue and its comments as GitHub's API
 returns them. <previous dir>, on a round after the first, holds what the round
-before left: pin-agent.json or pin-agent.why, and mutation-sensor.json.
+before left: pin-agent.json, or pin-agent.why with pin-agent.rejected.json, and
+mutation-sensor.json.
 
 Writes, into <out dir>:
   item.json      the idea, the type (from the item's "type:" label), the owner, the round
@@ -51,11 +52,13 @@ def previous(folder, round_):
     agent = os.path.join(folder, "pin-agent.json")
     why = os.path.join(folder, "pin-agent.why")
     sensor = os.path.join(folder, "mutation-sensor.json")
+    refused = os.path.join(folder, "pin-agent.rejected.json")
     result = load(agent) if os.path.isfile(agent) else None
     reason = text(why).strip() if os.path.isfile(why) else None
     run = load(sensor) if os.path.isfile(sensor) else None
     return {"round": round_ - 1, "what_was_wrong": understand_gate.problems(result, reason, run)[0],
-            "your_result": result, "sensor": run}
+            "your_result": result if result is not None else load(refused) if os.path.isfile(refused) else None,
+            "your_result_was_accepted": result is not None, "sensor": run}
 
 
 def main(argv):

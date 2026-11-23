@@ -138,7 +138,7 @@ class Check(unittest.TestCase):
         self.assertIn("not written as", check.where_problem("docs/baseline.md line 2", self.clone))
 
     def test_a_good_result_is_written_from_claude_and_from_codex(self):
-        good = agent_result(related=[{"where": "docs/baseline.md:1-2", "why": "Same page.", "quote": "one  two"}])
+        good = agent_result(related=[{"where": "docs/baseline.md:1-3", "why": "Same page.", "quote": "one  two three"}])
         self.assertEqual(self.run_check("intake-agent", {"type": "result", "subtype": "success", "is_error": False,
                                                          "structured_output": good})[0], 0)
         self.assertEqual(load(os.path.join(self.out, "intake-agent.json")), good)
@@ -170,15 +170,28 @@ class Check(unittest.TestCase):
         self.assertEqual(self.run_check("intake-agent", cite("docs/baseline.md:2-3", "two three"))[0], 0)
         self.assertIn("is not at", self.run_check("intake-agent", cite("docs/baseline.md:1", "two three"))[1])
         self.assertIn("is not at", self.run_check("intake-agent", cite("docs/baseline.md", "two four"))[1])
-        self.assertIn("shorter than two words", self.run_check("intake-agent", cite("docs/baseline.md:1", "one"))[1])
+        self.assertIn("too short", self.run_check("intake-agent", cite("docs/baseline.md:1", "one"))[1])
         self.assertIn("folder", self.run_check("intake-agent", cite("docs", "one two"))[1])
+
+    def test_a_quote_of_code_may_be_one_word(self):
+        with open(os.path.join(self.clone, "docs", "page.html"), "w") as f:
+            f.write('<dl>\n  <dd th:text="${pet.type}"></dd>\n</dl>\n')
+        one_word = agent_result(related=[{"where": "docs/page.html:2", "why": "w", "quote": 'th:text="${pet.type}"'}])
+        self.assertEqual(self.run_check("intake-agent", one_word)[0], 0)
+
+    def test_a_refused_result_is_kept_for_the_agents_next_round(self):
+        refused = agent_result(related=[{"where": "docs/baseline.md:1", "why": "w", "quote": "not in the file"}])
+        self.assertEqual(self.run_check("intake-agent", refused)[0], 1)
+        self.assertEqual(load(os.path.join(self.out, "intake-agent.rejected.json")), refused)
+        self.assertEqual(self.run_check("intake-agent", agent_result())[0], 0)
+        self.assertFalse(os.path.exists(os.path.join(self.out, "intake-agent.rejected.json")))
 
     def test_a_result_must_not_contradict_itself(self):
         self.assertIn("at least two", self.run_check("intake-agent", agent_result(one_idea=False))[1])
         self.assertIn("not an item on the line",
                       self.run_check("intake-agent", agent_result(duplicates=[{"item": 99, "why": "Same."}]))[1])
         wrong = {"type": "defect", "agrees": True, "summary": "s",
-                 "facts": [{"fact": "f", "where": "docs/baseline.md:1-2", "quote": "one two"}]}
+                 "facts": [{"fact": "f", "where": "docs/baseline.md:1-3", "quote": "one two three"}]}
         self.assertIn("agrees is True", self.run_check("classifier", wrong)[1])
         self.assertIn("no facts", self.run_check("classifier", {**wrong, "agrees": False, "facts": []})[1])
 
@@ -586,6 +599,17 @@ class Stage(unittest.TestCase):
             self.assertEqual(got["round"], 1)
             self.assertIn("cannot fail", got["what_was_wrong"][0])
             self.assertEqual(got["your_result"]["summary"], "Two pins.")
+            self.assertTrue(got["your_result_was_accepted"])
+
+    def test_a_refused_result_goes_back_to_the_agent_with_the_reason(self):
+        with tempfile.TemporaryDirectory() as d:
+            dump(f"{d}/pin-agent.rejected.json", pin_result())
+            with open(f"{d}/pin-agent.why", "w") as f:
+                f.write("the quote 'x' is not at 'y'")
+            got = stage.previous(d, 2)
+            self.assertEqual(got["your_result"]["summary"], "Two pins.")
+            self.assertFalse(got["your_result_was_accepted"])
+            self.assertIn("is not at", got["what_was_wrong"][0])
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ Read no production code and no tests. What the system does today is the next sta
 ## Rules for every claim
 
 - Cite a place for every claim about the constitution, written as `path:line` or `path:line-line`, with the path relative to the repository's root. Cite only what you have read.
-- With each place give a quote: two to fifteen words copied exactly from those lines. A script checks every place and every quote. A place that does not exist, or a quote that is not there word for word, voids your whole result.
+- With each place give a quote: eight to 150 characters copied exactly from the lines you cite, code or text. `th:text="${pet.type}"` is a good quote of a template line. Copy from the file you cite, and not from a test or a document that speaks about it. A script looks for every quote, character for character, in the cited lines. A place that does not exist, or a quote that is not there, voids your whole result.
 - Say each thing once, in the field where it belongs. A word the constitution lacks is a gap: do not also list it as a term, an open point and a line of the summary.
 - A duplicate cites an item number from `items.json`.
 - When the constitution says nothing about a point, say so under gaps. Do not fill the silence with a guess.

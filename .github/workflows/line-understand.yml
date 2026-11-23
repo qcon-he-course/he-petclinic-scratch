@@ -145,6 +145,7 @@ jobs:
           path: |
             out/pin-agent.json
             out/pin-agent.why
+            out/pin-agent.rejected.json
             out/pin-agent.ran.json
           if-no-files-found: ignore
           overwrite: true

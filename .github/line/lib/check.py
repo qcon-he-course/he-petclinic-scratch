@@ -8,13 +8,16 @@
 ... -o` wrote (the result is the whole object).
 
 Exit 0: <out dir>/<box>.json holds the result. Exit 1: <out dir>/<box>.why holds the
-reason and there is no result. A run that ended in an error, hit its turn or budget
+reason and there is no result; when the agent did return something and the check
+refused it, <out dir>/<box>.rejected.json holds what it returned, for the agent's
+next round and for nobody else. A run that ended in an error, hit its turn or budget
 limit, returned no structured output, broke the schema or cited something that is
 not there all exit 1. The gate reads a missing result as a failed check.
 
 Beyond the schema, a result is held to what a script can check:
   - every "where" names a file of the clone, and lines that file has;
-  - every "quote" is in the place its "where" names, word for word;
+  - every "quote" is in the place its "where" names, character for character, and is
+    at least eight characters long;
   - every duplicate names an item that is on the line;
   - the lists and the texts have a size a person can read;
   - the result does not contradict itself (one idea and two ideas; agrees and differs);
@@ -30,6 +33,7 @@ from common import dump, load
 WHERE = re.compile(r"([^:\s]+)(?::(\d+)(?:-(\d+))?)?")
 TEXT_LIMIT, LIST_LIMIT = 700, 12
 LIMITS = {"content": 30000}  # a key whose text may be longer: the source of a test file
+QUOTE_MIN = 8  # characters. A quote of code is often one word: th:text="${pet.type}"
 TESTS = "src/test/java/"
 PIN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*#[A-Za-z_][A-Za-z0-9_]*")
 
@@ -93,7 +97,7 @@ def where_problem(where, clone):
 
 
 def quote_problem(where, quote, clone):
-    """None when <quote> stands in the place <where> names, word for word; spacing is not compared."""
+    """None when <quote> stands in the place <where> names, character for character; spacing is not compared."""
     m = WHERE.fullmatch(where.strip())
     full = os.path.join(clone, os.path.normpath(m.group(1)))
     if os.path.isdir(full):
@@ -105,10 +109,12 @@ def quote_problem(where, quote, clone):
         lines = lines[first - 1:last]
     squeeze = lambda t: " ".join(t.split())
     words = squeeze(quote)
-    if len(words.split()) < 2:
-        return f"the quote for {where!r} is shorter than two words"
+    if len(words) < QUOTE_MIN:
+        return (f"the quote {words!r} for {where!r} is too short to show anything: copy at least {QUOTE_MIN} characters "
+                "from those lines, code or text")
     if words not in squeeze(" ".join(lines)):
-        return f"the quote {words[:60]!r} is not at {where!r}"
+        return (f"the quote {words[:60]!r} is not at {where!r}: copy it exactly from those lines, "
+                "or cite the lines where it stands")
     return None
 
 
@@ -214,7 +220,8 @@ def main(argv):
     box, schema, raw, clone, inputs, out = argv
     os.makedirs(out, exist_ok=True)
     good, bad = os.path.join(out, f"{box}.json"), os.path.join(out, f"{box}.why")
-    for stale in (good, bad):
+    rejected = os.path.join(out, f"{box}.rejected.json")
+    for stale in (good, bad, rejected):
         if os.path.exists(stale):
             os.remove(stale)
 
@@ -234,6 +241,8 @@ def main(argv):
     if not problems:
         problems = box_problems(box, result, clone, inputs)
     if problems:
+        if isinstance(result, dict):
+            dump(rejected, result)
         return refuse("; ".join(problems[:6]) + (f"; and {len(problems) - 6} more" if len(problems) > 6 else ""))
     dump(good, result)
     print(f"check: {box} left a result")

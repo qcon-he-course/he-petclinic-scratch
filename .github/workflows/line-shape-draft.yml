@@ -1,0 +1,320 @@
+# Shape, part two: a spec is drafted from the owner's decisions, then reviewed. The
+# owner's session has ended. A person acts only when the drafter asks.
+#
+#   door                lets an answered item in, and gathers what the drafter is
+#                       given: the item, the pins' names and, when the draft comes
+#                       back or the item was parked, what the earlier run left.
+#                       No model, no key.
+#   spec-drafter        reads the owner's decisions, the pins and the spec template,
+#                       and returns the draft, whole. One API key, no shell, no
+#                       permission to write.
+#   completeness-check  writes the draft into a checkout and checks it against the
+#                       template, and every decision against the draft. No model.
+#   reviewer            a second agent, from a second vendor, in a fresh session:
+#                       checks the draft against the decisions and the pins. It runs
+#                       only on a complete draft. One API key, a read-only sandbox.
+#   draft-gate          posts what the boxes left and applies the policy: returns the
+#                       draft to the drafter, parks the item and calls the owner,
+#                       marks it stuck, or puts the reviewed draft on the item's
+#                       branch. No model, no key.
+#
+# Started by a dispatch: from the commit check when the owner's decisions pass, or
+# from this workflow's own gate for the next round.
+name: "line: shape, the draft"
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: The item's number
+        required: true
+      round:
+        description: The round, 1 unless the gate returned the draft to the drafter
+        default: "1"
+      previous:
+        description: The run of the round before, when there is one
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: line-shape-draft-${{ inputs.issue }}
+  cancel-in-progress: false
+
+env:
+  ITEM: ${{ inputs.issue }}
+  ROUND: ${{ inputs.round }}
+  PREVIOUS: ${{ inputs.previous }}
+
+jobs:
+  door:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    outputs:
+      go: ${{ steps.item.outputs.go }}
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          persist-credentials: false
+      - name: Read the item, and find the run whose results the drafter starts from
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in "$ITEM" "$ROUND" "${PREVIOUS:-0}"; do
+            case "$n" in ''|*[!0-9]*) echo "an input is not a number" >&2; exit 1 ;; esac
+          done
+          mkdir -p run/previous
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM" > run/issue.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$ITEM/comments?per_page=100" \
+            | python3 -c 'import json, sys; json.dump([c for page in json.load(sys.stdin) for c in page], sys.stdout)' > run/comments.json
+          python3 -B .github/line/lib/stage.py draft-plan run/comments.json ${PREVIOUS:+"$PREVIOUS"}
+      - name: Fetch what that run left
+        if: steps.plan.outputs.previous != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: result-*
+          path: run/previous
+          merge-multiple: true
+          run-id: ${{ steps.plan.outputs.previous }}
+          github-token: ${{ github.token }}
+        continue-on-error: true
+      - name: Let the item in
+        id: item
+        run: python3 -B .github/line/lib/stage.py draft run/issue.json run/comments.json .github/line run/item "$ROUND" run/previous
+      - name: Mark the item
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B .github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/item/effects.json .github/line
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.item.outputs.go == 'yes'
+        with:
+          name: item
+          path: |
+            run/item/item.json
+            run/item/pins.json
+            run/item/previous.json
+          if-no-files-found: ignore
+          overwrite: true
+
+  spec-drafter:
+    needs: door
+    if: needs.door.outputs.go == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the item's branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: item-${{ inputs.issue }}
+          path: repo
+          persist-credentials: false
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the agent's command-line tool
+        run: npm install --global @anthropic-ai/claude-code@2.1.281
+      - name: Draft the spec from the owner's decisions, with one key and no way to write
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AGENT_MAX_TURNS: "80"
+          AGENT_BUDGET_USD: "3"
+          AGENT_TIME_CAP: "1200"
+        run: ctl/.github/line/lib/agent.sh claude shape/spec-drafter repo inputs out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-spec-drafter
+          path: |
+            out/spec-drafter.json
+            out/spec-drafter.why
+            out/spec-drafter.rejected.json
+            out/spec-drafter.ran.json
+          if-no-files-found: ignore
+          overwrite: true
+
+  completeness-check:
+    needs: spec-drafter
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.check.outputs.passed }}
+    steps:
+      - name: Check out the item's branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: item-${{ inputs.issue }}
+          path: repo
+          persist-credentials: false
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: result-spec-drafter
+          path: agent
+      - name: Write the draft into the checkout
+        run: python3 -B ctl/.github/line/lib/draft.py write agent/spec-drafter.json repo "$ITEM"
+      - name: Check the draft against the template, and every decision against the draft
+        id: check
+        run: |
+          python3 -B ctl/.github/line/lib/draft.py check repo "$ITEM" out
+          git -C repo add -N "openspec/changes/item-$ITEM"
+          git -C repo diff -- "openspec/changes/item-$ITEM" > out/draft.patch
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-completeness
+          path: |
+            out/completeness.json
+            out/draft.patch
+          if-no-files-found: ignore
+          overwrite: true
+
+  reviewer:
+    needs: completeness-check
+    if: needs.completeness-check.outputs.passed == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the item's branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: item-${{ inputs.issue }}
+          path: repo
+          persist-credentials: false
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: result-completeness
+          path: draft
+      - name: Write the draft into the checkout
+        run: |
+          rm -f inputs/previous.json
+          git -C repo apply --index --include="openspec/changes/item-$ITEM/*" "$PWD/draft/draft.patch"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the agent's command-line tool
+        run: npm install --global @openai/codex@0.163.0
+      # Codex reads files through commands in a sandbox with no write access and no
+      # network. Ubuntu 24.04 stops that sandbox from starting; this setting lets it start.
+      - name: Let Codex's sandbox start
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Review the draft against the decisions and the pins, with one key and no way to write
+        env:
+          CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_TIME_CAP: "900"
+        run: ctl/.github/line/lib/agent.sh codex shape/spec-reviewer repo inputs out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-spec-reviewer
+          path: |
+            out/spec-reviewer.json
+            out/spec-reviewer.why
+            out/spec-reviewer.ran.json
+          if-no-files-found: ignore
+          overwrite: true
+
+  draft-gate:
+    needs: [door, spec-drafter, completeness-check, reviewer]
+    if: always() && needs.door.outputs.go == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      actions: write
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - name: Fetch what the boxes left
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+        continue-on-error: true
+      - name: Apply the policy
+        id: gate
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p results run
+          ls -l results
+          python3 -B ctl/.github/line/lib/draft_gate.py inputs/item.json results ctl/.github/line run
+      - name: Check out the item's branch
+        if: steps.gate.outputs.outcome == 'reviewed'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: item-${{ inputs.issue }}
+          path: repo
+      # Every write of the line goes to the item's branch. Only the draft's files travel.
+      - name: Put the reviewed draft on the item's branch
+        if: steps.gate.outputs.outcome == 'reviewed'
+        run: |
+          cd repo
+          git apply --index --include="openspec/changes/item-$ITEM/*" "$GITHUB_WORKSPACE/results/draft.patch"
+          if git diff --cached --name-only | grep -v -E "^openspec/changes/item-$ITEM/(proposal\.md|specs/.+/spec\.md)$"; then
+            echo "the patch touches a file that is not the draft's" >&2; exit 1
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Shape: draft spec for item $ITEM" -m "Drafted by the spec-drafter agent from the owner's decisions, checked for completeness and reviewed by an independent reviewer (run $GITHUB_RUN_ID)."
+          git push origin "HEAD:item-$ITEM"
+      - name: Post the results and the gate's decision on the item
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B ctl/.github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json ctl/.github/line
+      # A dispatch made with this workflow's token starts a workflow. A label does not.
+      - name: Start the next round
+        if: steps.gate.outputs.outcome == 'return'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.gate.outputs.round }}
+        run: |
+          gh workflow run line-shape-draft.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f issue="$ITEM" -f round="$NEXT" -f previous="$GITHUB_RUN_ID"

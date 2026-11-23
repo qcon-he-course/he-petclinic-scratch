@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["files", "resolved", "questions", "summary"],
+  "properties": {
+    "files": {
+      "type": "array",
+      "description": "The draft, whole: proposal.md and each delta spec, under openspec/changes/item-<number>/",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "content"],
+        "properties": {
+          "path": { "type": "string", "description": "openspec/changes/item-<number>/proposal.md or openspec/changes/item-<number>/specs/<capability>/spec.md" },
+          "content": { "type": "string", "description": "The complete Markdown of the file" }
+        }
+      }
+    },
+    "resolved": {
+      "type": "array",
+      "description": "On a later round: each gap or finding you were given, and what you did about it. Empty on the first round",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["about", "how"],
+        "properties": {
+          "about": { "type": "string", "description": "The finding's id, such as S2, or the gap in a few words" },
+          "how": { "type": "string", "description": "What changed in the draft, or which question you ask instead" }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "description": "Only what the owner must decide before the draft can be right. Empty when the decisions settle everything",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "why", "recommended"],
+        "properties": {
+          "question": { "type": "string", "description": "One question, worded so that yes accepts the recommendation" },
+          "why": { "type": "string", "description": "What in the decisions, the pins or a finding leaves it open" },
+          "recommended": { "type": "string", "description": "The answer you would give, and the reason" }
+        }
+      }
+    },
+    "summary": { "type": "string", "description": "Two sentences at most, for the item's owner" }
+  }
+}

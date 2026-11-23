@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings", "summary"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "description": "Each place where the draft is wrong against the decisions or the pins. Empty when there is none",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "against", "claim", "where", "quote", "needs_decision"],
+        "properties": {
+          "id": { "type": "string", "description": "S1, S2, ..." },
+          "kind": {
+            "type": "string",
+            "enum": ["contradicts a decision", "contradicts a pin", "decision not shown", "beyond the decisions", "cannot be checked"],
+            "description": "contradicts a decision: the draft says other than the log. contradicts a pin: the draft changes behavior a pin records and no decision changes that pin. decision not shown: a decision's concrete case has no scenario. beyond the decisions: the draft specifies behavior no decision asked for. cannot be checked: a scenario is too vague to pass or fail"
+          },
+          "against": { "type": "string", "description": "The decision (D3) or the pin (TestClass#method) the finding rests on" },
+          "claim": { "type": "string", "description": "What is wrong, in one or two sentences" },
+          "where": { "type": "string", "description": "The place in the draft: path:line or path:line-line, relative to the repository's root" },
+          "quote": { "type": "string", "description": "Eight to 150 characters copied exactly from the cited lines of the draft" },
+          "needs_decision": { "type": "boolean", "description": "True when only the owner can settle it, false when the decisions already say what is right" }
+        }
+      }
+    },
+    "summary": { "type": "string", "description": "Two sentences at most" }
+  }
+}

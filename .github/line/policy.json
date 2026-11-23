@@ -82,12 +82,23 @@
       "15803d",
       "Add this label when the owner's decisions are pushed. It starts the commit check"
     ],
+    "parked": [
+      "c2410c",
+      "The line waits for the owner's answer to a question"
+    ],
+    "draft-reviewed": [
+      "15803d",
+      "The draft spec is complete and reviewed, and waits for the owner"
+    ],
     "suspect": [
       "b45309",
       "Behavior the line saw that looks wrong: a potential defect"
     ]
   },
   "understand": {
+    "max-rounds": 3
+  },
+  "shape": {
     "max-rounds": 3
   }
 }

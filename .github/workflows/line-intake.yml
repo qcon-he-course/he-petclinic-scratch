@@ -1,0 +1,284 @@
+# Intake, the first stage of the line: an idea, filed as an issue, gets an owner.
+#
+#   door            reads the issue as an item. No model, no key.
+#   intake-agent    reads the item and the constitution: one idea, the team's words,
+#                   duplicates, related work, reversed decisions. One API key, no shell,
+#                   no permission to write.
+#   intake-check    runs a failing test the item brings, and writes none. No model.
+#   classifier      a second agent, from a second vendor, checks the type the requester
+#                   picked against the code. One API key, a read-only sandbox.
+#   admission-gate  posts what the boxes left, then applies the policy: admits a narrow
+#                   class alone, returns an item that is not ready, or calls a person.
+#                   No model, no key.
+#   admit           a person added the label "admit": checks that they may, and records
+#                   them as the item's owner. No model, no key.
+#
+# An agent's job holds a key and cannot write. The jobs that write hold no key and post
+# only what a script accepted. The scripts, the skills and the policy are in .github/line/
+# on the default branch, under .github/CODEOWNERS: an item cannot edit what judges it.
+# The agents read the source at the branch LINE_BRANCH names.
+name: "line: intake"
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: The item's number, to run Intake on it again
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: line-intake-${{ github.event.issue.number || inputs.issue }}-${{ github.event.action || 'again' }}
+  cancel-in-progress: false
+
+env:
+  ITEM: ${{ github.event.issue.number || inputs.issue }}
+  LINE_BRANCH: line
+
+jobs:
+  door:
+    if: github.event_name == 'workflow_dispatch' || github.event.action == 'opened'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      go: ${{ steps.item.outputs.go }}
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          persist-credentials: false
+      - name: Read the issue as an item
+        id: item
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$ITEM" in ''|*[!0-9]*) echo "the item's number is not a number" >&2; exit 1 ;; esac
+          mkdir -p run
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM" > run/issue.json
+          gh api "repos/$GITHUB_REPOSITORY/issues?labels=line&state=all&per_page=100" > run/others.json
+          python3 -B .github/line/lib/item.py run/issue.json run/others.json .github/line run/item
+      - name: Mark the item
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B .github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/item/effects.json .github/line
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.item.outputs.go == 'yes'
+        with:
+          name: item
+          path: |
+            run/item/item.json
+            run/item/items.json
+          overwrite: true
+
+  intake-agent:
+    needs: door
+    if: needs.door.outputs.go == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the source the line works on
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.LINE_BRANCH }}
+          path: repo
+          persist-credentials: false
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the agent's command-line tool
+        run: npm install --global @anthropic-ai/claude-code@2.1.281
+      - name: Read the item and the constitution, with one key and no way to write
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: ctl/.github/line/lib/agent.sh claude intake/intake-agent repo inputs out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-intake-agent
+          path: |
+            out/intake-agent.json
+            out/intake-agent.why
+            out/intake-agent.by
+          if-no-files-found: ignore
+          overwrite: true
+
+  intake-check:
+    needs: door
+    if: needs.door.outputs.go == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - name: See whether the item brings a failing test
+        id: plan
+        run: python3 -B ctl/.github/line/lib/proof.py plan inputs/item.json
+      - name: Nothing to run
+        if: steps.plan.outputs.ref == ''
+        run: python3 -B ctl/.github/line/lib/proof.py none out
+      - name: Check out the branch that carries the test
+        if: steps.plan.outputs.ref != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.plan.outputs.ref }}
+          path: proof
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        if: steps.plan.outputs.ref != ''
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Run the test the item names
+        if: steps.plan.outputs.ref != ''
+        env:
+          TEST: ${{ steps.plan.outputs.test }}
+        run: |
+          (cd proof && ./mvnw -B -q test -Dtest="$TEST" -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dspring-javaformat.skip=true -Dcheckstyle.skip=true) || echo "the build ended with $?"
+          python3 -B ctl/.github/line/lib/proof.py read inputs/item.json proof/target/surefire-reports out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-intake-check
+          path: out/intake-check.json
+          if-no-files-found: ignore
+          overwrite: true
+
+  classifier:
+    needs: door
+    if: needs.door.outputs.go == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the source the line works on
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.LINE_BRANCH }}
+          path: repo
+          persist-credentials: false
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the agent's command-line tool
+        run: npm install --global @openai/codex@0.163.0
+      # Codex reads files through commands in a sandbox with no write access and no
+      # network. Ubuntu 24.04 stops that sandbox from starting; this setting lets it start.
+      - name: Let Codex's sandbox start
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Check the type against the code, with one key and no way to write
+        env:
+          CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: ctl/.github/line/lib/agent.sh codex intake/classifier repo inputs out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-classifier
+          path: |
+            out/classifier.json
+            out/classifier.why
+            out/classifier.by
+          if-no-files-found: ignore
+          overwrite: true
+
+  admission-gate:
+    needs: [door, intake-agent, intake-check, classifier]
+    if: always() && needs.door.outputs.go == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - name: Fetch what the boxes left
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+        continue-on-error: true
+      - name: Apply the admission policy
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p results run
+          ls -l results
+          python3 -B .github/line/lib/gate.py inputs/item.json results .github/line run/effects.json
+      - name: Post the results and the gate's decision on the item
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B .github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json .github/line
+
+  admit:
+    if: github.event.action == 'labeled' && github.event.label.name == 'admit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          persist-credentials: false
+      - name: Check who admits, and record the owner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENDER: ${{ github.event.sender.login }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          mkdir -p run
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM" > run/issue.json
+          python3 -B .github/line/lib/admit.py run/issue.json "$SENDER" .github/line run/effects.json
+          python3 -B .github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json .github/line

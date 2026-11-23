@@ -1,0 +1,83 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["one_idea", "ideas", "terms", "duplicates", "related", "reversed_decisions", "questions_for_requester", "open_points", "gaps", "summary"],
+  "properties": {
+    "one_idea": { "type": "boolean", "description": "True when the item states exactly one idea" },
+    "ideas": {
+      "type": "array",
+      "description": "When one_idea is true: the one idea, restated in the team's words. When false: each separate idea, one entry each",
+      "items": { "type": "string" }
+    },
+    "terms": {
+      "type": "array",
+      "description": "Each domain word of the idea, with the word the team uses for it and where the team's word is written",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["word", "team_word", "where"],
+        "properties": {
+          "word": { "type": "string", "description": "The requester's word" },
+          "team_word": { "type": "string", "description": "The team's word; the same word when they agree" },
+          "where": { "type": "string", "description": "path, path:line or path:line-line" }
+        }
+      }
+    },
+    "duplicates": {
+      "type": "array",
+      "description": "Other items on the line that ask for the same thing; empty when there are none",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item", "why"],
+        "properties": {
+          "item": { "type": "integer", "description": "The other item's number, from items.json" },
+          "why": { "type": "string" }
+        }
+      }
+    },
+    "related": {
+      "type": "array",
+      "description": "Requirements, decision records and archived changes that concern the same thing",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["where", "why"],
+        "properties": {
+          "where": { "type": "string", "description": "path, path:line or path:line-line" },
+          "why": { "type": "string" }
+        }
+      }
+    },
+    "reversed_decisions": {
+      "type": "array",
+      "description": "Standing decisions the idea, as stated, would reverse; empty when there are none",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["decision", "where", "why"],
+        "properties": {
+          "decision": { "type": "string" },
+          "where": { "type": "string", "description": "path, path:line or path:line-line" },
+          "why": { "type": "string" }
+        }
+      }
+    },
+    "questions_for_requester": {
+      "type": "array",
+      "description": "Only what must be answered before the item states one idea a person can admit; empty when nothing is missing",
+      "items": { "type": "string" }
+    },
+    "open_points": {
+      "type": "array",
+      "description": "Points for the person who admits the item to know. Not questions the line needs answered now",
+      "items": { "type": "string" }
+    },
+    "gaps": {
+      "type": "array",
+      "description": "What the constitution lacks for this read, for example no glossary; empty when it lacks nothing",
+      "items": { "type": "string" }
+    },
+    "summary": { "type": "string", "description": "Two sentences at most, for the person who admits" }
+  }
+}

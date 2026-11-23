@@ -10,8 +10,8 @@
 #   admission-gate  posts what the boxes left, then applies the policy: admits a narrow
 #                   class alone, returns an item that is not ready, or calls a person.
 #                   No model, no key.
-#   admit           a person added the label "admit": checks that they may, and records
-#                   them as the item's owner. No model, no key.
+#   admit           a person added the label "admit": checks that they may, records
+#                   them as the item's owner, and starts Understand. No model, no key.
 #
 # An agent's job holds a key and cannot write. The jobs that write hold no key and post
 # only what a script accepted. The scripts, the skills and the policy are in .github/line/
@@ -117,7 +117,7 @@ jobs:
           path: |
             out/intake-agent.json
             out/intake-agent.why
-            out/intake-agent.by
+            out/intake-agent.ran.json
           if-no-files-found: ignore
           overwrite: true
 
@@ -217,7 +217,7 @@ jobs:
           path: |
             out/classifier.json
             out/classifier.why
-            out/classifier.by
+            out/classifier.ran.json
           if-no-files-found: ignore
           overwrite: true
 
@@ -229,6 +229,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      actions: write
     steps:
       - name: Check out the line's scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -247,6 +248,7 @@ jobs:
           merge-multiple: true
         continue-on-error: true
       - name: Apply the admission policy
+        id: gate
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -258,6 +260,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 -B .github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json .github/line
+      # A label set with this workflow's token starts no workflow. A dispatch does.
+      - name: Start Understand, when the gate admitted the item alone
+        if: steps.gate.outputs.outcome == 'admitted'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run line-understand.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f issue="$ITEM"
 
   admit:
     if: github.event.action == 'labeled' && github.event.label.name == 'admit'
@@ -266,6 +274,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      actions: write
     steps:
       - name: Check out the line's scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -273,6 +282,7 @@ jobs:
           sparse-checkout: .github/line
           persist-credentials: false
       - name: Check who admits, and record the owner
+        id: admit
         env:
           GH_TOKEN: ${{ github.token }}
           SENDER: ${{ github.event.sender.login }}
@@ -282,3 +292,9 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM" > run/issue.json
           python3 -B .github/line/lib/admit.py run/issue.json "$SENDER" .github/line run/effects.json
           python3 -B .github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json .github/line
+      # A label set with this workflow's token starts no workflow. A dispatch does.
+      - name: Start Understand
+        if: steps.admit.outputs.admitted == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run line-understand.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f issue="$ITEM"

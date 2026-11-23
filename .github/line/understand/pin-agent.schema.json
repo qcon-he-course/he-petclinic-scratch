@@ -1,0 +1,63 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pins", "files", "target_classes", "suspects", "gaps", "summary"],
+  "properties": {
+    "pins": {
+      "type": "array",
+      "description": "The behaviors of today that this item puts at risk, each with the test that pins it. Three to eight",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "test", "file", "where", "quote"],
+        "properties": {
+          "name": { "type": "string", "description": "The behavior in plain English, as the item's owner would say it. One sentence, present tense" },
+          "kind": { "type": "string", "enum": ["cited", "written"], "description": "cited: a test that exists pins it. written: this result writes the test" },
+          "test": { "type": "string", "description": "TestClass#method" },
+          "file": { "type": "string", "description": "The test's file, relative to the repository's root" },
+          "where": { "type": "string", "description": "The production code or template that behaves this way: path:line or path:line-line" },
+          "quote": { "type": "string", "description": "Two to fifteen words copied exactly from the place cited" }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "description": "Each new test file, whole. Empty when every pin is cited",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "content"],
+        "properties": {
+          "path": { "type": "string", "description": "A new file under src/test/java/, relative to the repository's root" },
+          "content": { "type": "string", "description": "The complete Java source of the file" }
+        }
+      }
+    },
+    "target_classes": {
+      "type": "array",
+      "description": "The production classes whose behavior the pins record, as files under src/main/java/. The mutation sensor changes these",
+      "items": { "type": "string" }
+    },
+    "suspects": {
+      "type": "array",
+      "description": "Behavior of today that looks wrong. Empty when nothing does",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["behavior", "why", "where", "quote"],
+        "properties": {
+          "behavior": { "type": "string", "description": "What the code does, in one sentence" },
+          "why": { "type": "string", "description": "Why it looks wrong, and against what: a requirement, a decision record, or plain expectation" },
+          "where": { "type": "string", "description": "path:line or path:line-line" },
+          "quote": { "type": "string", "description": "Two to fifteen words copied exactly from the place cited" }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "description": "What could not be pinned and why, for example behavior that lives only in a template no test renders; empty when nothing",
+      "items": { "type": "string" }
+    },
+    "summary": { "type": "string", "description": "Two sentences at most, for the item's owner" }
+  }
+}

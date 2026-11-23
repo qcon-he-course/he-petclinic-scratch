@@ -20,8 +20,11 @@ import admit  # noqa: E402
 import check  # noqa: E402
 import gate  # noqa: E402
 import item  # noqa: E402
+import pins  # noqa: E402
 import proof  # noqa: E402
-from common import clean, data_block, dump, load, text  # noqa: E402
+import stage  # noqa: E402
+import understand_gate  # noqa: E402
+from common import BOT, clean, data_block, dump, latest, load, read_results, text  # noqa: E402
 
 POLICY = load(os.path.join(LINE, "policy.json"))
 PEOPLE = {"requesters": ["ana"], "product-owner": ["pat"], "tech-lead": ["tess"]}
@@ -47,7 +50,8 @@ def agent_result(**more):
 def results(agent=None, outcome="nothing to run", kind="behavior-change", agrees=True):
     return {"intake-agent": agent or agent_result(),
             "intake-check": proof.result(outcome, None, "The item brings no failing test."),
-            "classifier": {"type": kind, "agrees": agrees, "facts": [{"fact": "No age is shown.", "where": "README.md"}],
+            "classifier": {"type": kind, "agrees": agrees,
+                           "facts": [{"fact": "No age is shown.", "where": "README.md:1", "quote": "Spring PetClinic"}],
                            "summary": "New behavior."}}
 
 
@@ -117,7 +121,8 @@ class Check(unittest.TestCase):
     def run_check(self, box, raw):
         dump(os.path.join(self.d.name, "raw.json"), raw)
         with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
-            code = check.main([box, os.path.join(LINE, "intake", f"{box}.schema.json"), os.path.join(self.d.name, "raw.json"),
+            folder = "understand" if box == "pin-agent" else "intake"
+            code = check.main([box, os.path.join(LINE, folder, f"{box}.schema.json"), os.path.join(self.d.name, "raw.json"),
                                self.clone, self.inputs, self.out])
         why = os.path.join(self.out, f"{box}.why")
         return code, text(why) if os.path.exists(why) else ""
@@ -133,7 +138,7 @@ class Check(unittest.TestCase):
         self.assertIn("not written as", check.where_problem("docs/baseline.md line 2", self.clone))
 
     def test_a_good_result_is_written_from_claude_and_from_codex(self):
-        good = agent_result(related=[{"where": "docs/baseline.md:1", "why": "Same page."}])
+        good = agent_result(related=[{"where": "docs/baseline.md:1-2", "why": "Same page.", "quote": "one  two"}])
         self.assertEqual(self.run_check("intake-agent", {"type": "result", "subtype": "success", "is_error": False,
                                                          "structured_output": good})[0], 0)
         self.assertEqual(load(os.path.join(self.out, "intake-agent.json")), good)
@@ -155,15 +160,25 @@ class Check(unittest.TestCase):
         self.assertIn("limit", self.run_check("intake-agent", agent_result(open_points=["p"] * 40))[1])
 
     def test_a_cited_place_that_is_not_there_voids_the_result(self):
-        code, why = self.run_check("intake-agent", agent_result(related=[{"where": "GLOSSARY.md", "why": "The word age."}]))
+        gone = agent_result(related=[{"where": "GLOSSARY.md:1", "why": "The word age.", "quote": "How old a pet is"}])
+        code, why = self.run_check("intake-agent", gone)
         self.assertEqual(code, 1)
         self.assertIn("no such file", why)
+
+    def test_a_quote_must_stand_in_the_cited_lines_word_for_word(self):
+        cite = lambda where, quote: agent_result(related=[{"where": where, "why": "w", "quote": quote}])
+        self.assertEqual(self.run_check("intake-agent", cite("docs/baseline.md:2-3", "two three"))[0], 0)
+        self.assertIn("is not at", self.run_check("intake-agent", cite("docs/baseline.md:1", "two three"))[1])
+        self.assertIn("is not at", self.run_check("intake-agent", cite("docs/baseline.md", "two four"))[1])
+        self.assertIn("shorter than two words", self.run_check("intake-agent", cite("docs/baseline.md:1", "one"))[1])
+        self.assertIn("folder", self.run_check("intake-agent", cite("docs", "one two"))[1])
 
     def test_a_result_must_not_contradict_itself(self):
         self.assertIn("at least two", self.run_check("intake-agent", agent_result(one_idea=False))[1])
         self.assertIn("not an item on the line",
                       self.run_check("intake-agent", agent_result(duplicates=[{"item": 99, "why": "Same."}]))[1])
-        wrong = {"type": "defect", "agrees": True, "facts": [{"fact": "f", "where": "docs"}], "summary": "s"}
+        wrong = {"type": "defect", "agrees": True, "summary": "s",
+                 "facts": [{"fact": "f", "where": "docs/baseline.md:1-2", "quote": "one two"}]}
         self.assertIn("agrees is True", self.run_check("classifier", wrong)[1])
         self.assertIn("no facts", self.run_check("classifier", {**wrong, "agrees": False, "facts": []})[1])
 
@@ -176,8 +191,8 @@ class Check(unittest.TestCase):
                     walk(sub, f"{at}.{k}")
             elif s.get("type") == "array":
                 walk(s["items"], at + "[]")
-        for box in ("intake-agent", "classifier"):
-            walk(load(os.path.join(LINE, "intake", f"{box}.schema.json")), box)
+        for stage_, box in (("intake", "intake-agent"), ("intake", "classifier"), ("understand", "pin-agent")):
+            walk(load(os.path.join(LINE, stage_, f"{box}.schema.json")), box)
 
 
 class Gate(unittest.TestCase):
@@ -251,6 +266,21 @@ class Gate(unittest.TestCase):
         self.assertTrue(set(effects["add"] + effects["remove"]) <= set(POLICY["labels"]))
         self.assertIn("<!-- line:result stage=intake box=classifier run=local -->", effects["comments"][2])
 
+    def test_the_footer_says_what_ran_the_box_and_what_it_cost(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(f"{d}/inputs")
+            os.makedirs(f"{d}/results")
+            dump(f"{d}/inputs/item.json", an_item())
+            for box, r in results().items():
+                dump(f"{d}/results/{box}.json", r)
+            dump(f"{d}/results/intake-agent.ran.json", {"tool": "Claude Code", "model": "m", "seconds": 29, "turns": 9, "cost_usd": 0.2136})
+            with contextlib.redirect_stdout(io.StringIO()):
+                gate.main([f"{d}/inputs/item.json", f"{d}/results", LINE, f"{d}/effects.json"])
+            first, second = load(f"{d}/effects.json")["comments"][:2]
+            self.assertIn("Claude Code, m, 9 turns, $0.21, 29 s", first)
+            self.assertIn("a job, no model", second)
+            self.assertEqual(read_results([{"user": {"login": BOT}, "body": first}])[0][3]["turns"], 9)
+
     def test_main_posts_the_reason_when_a_box_left_no_result(self):
         res = results()
         del res["intake-agent"]
@@ -270,7 +300,7 @@ class Gate(unittest.TestCase):
         self.assertNotIn("[click](", shown)
         self.assertEqual(body.count("<!-- line:result"), 1)
         self.assertEqual(body.count("</details>"), 1)
-        self.assertEqual(json.loads(body.split("```json\n")[1].split("\n```")[0]), nasty)
+        self.assertEqual(json.loads(body.split("```json\n")[1].split("\n```")[0])["result"], nasty)
 
 
 class Admit(unittest.TestCase):
@@ -339,7 +369,7 @@ class Posting(unittest.TestCase):
     def test_the_data_block_round_trips(self):
         value = {"text": "a `tick` <tag> @name"}
         block = data_block(value, "intake", "classifier", 7)
-        self.assertEqual(json.loads(block.split("```json\n")[1].split("\n```")[0]), value)
+        self.assertEqual(json.loads(block.split("```json\n")[1].split("\n```")[0]), {"ran": {}, "result": value})
         self.assertNotIn("@name", block)
 
     def test_apply_refuses_a_label_the_line_does_not_use_and_prints_its_calls_when_dry(self):
@@ -354,6 +384,208 @@ class Posting(unittest.TestCase):
                 self.assertIn(call, out.stdout)
             dump(f"{d}/bad.json", {"comments": [], "add": ["wontfix"], "remove": [], "assign": []})
             self.assertEqual(run(f"{d}/bad.json").returncode, 1)
+
+
+T = "src/test/java/org/example/"
+JAVA = 'class OwnerPinTests {\n  @Test\n  @Tag("observed")\n  void theBirthDateIsShown() {}\n  @Test\n  @Tag("observed")\n  void weak() {}\n}\n'
+
+
+def a_pin(name="The birth date is shown.", kind="written", test="OwnerPinTests#theBirthDateIsShown", file=T + "OwnerPinTests.java"):
+    return {"name": name, "kind": kind, "test": test, "file": file, "where": "src/main/java/org/example/Owner.java:1-2", "quote": "class Owner"}
+
+
+def pin_result(**more):
+    return {"pins": [a_pin(), a_pin("It exists.", "cited", "OwnerTests#exists", T + "OwnerTests.java")],
+            "files": [{"path": T + "OwnerPinTests.java", "content": JAVA}],
+            "target_classes": ["src/main/java/org/example/Owner.java"], "suspects": [], "gaps": [], "summary": "Two pins.", **more}
+
+
+def sensor_result(*rows, built=True):
+    names = {"OwnerPinTests#theBirthDateIsShown": "written", "OwnerTests#exists": "cited"}
+    made = [{"test": t, "name": "n", "kind": names.get(t, "written"), "ran": ran, "failure": None if ran == "passed" else "expected 1 but was 2",
+             "mutation": mutation, "killed": 1 if mutation == "can fail" else 0, "under": 0 if mutation in ("not judged", "not run") else 3}
+            for t, ran, mutation in rows]
+    return {"built": built, "build_problem": None if built else "[ERROR] cannot find symbol", "pins": made, "mutants": {"KILLED": 2, "SURVIVED": 1}}
+
+
+GOOD_ROWS = (("OwnerPinTests#theBirthDateIsShown", "passed", "can fail"), ("OwnerTests#exists", "passed", "not judged"))
+
+
+class Pins(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.clone = os.path.join(self.d.name, "clone")
+        for path, body in (("src/main/java/org/example/Owner.java", "public class Owner {\n}\n"),
+                           (T + "OwnerTests.java", "class OwnerTests {\n  @Test\n  void exists() {}\n}\n")):
+            os.makedirs(os.path.dirname(os.path.join(self.clone, path)), exist_ok=True)
+            with open(os.path.join(self.clone, path), "w") as f:
+                f.write(body)
+
+    def tearDown(self):
+        self.d.cleanup()
+
+    def problems(self, **more):
+        return check.pin_problems(pin_result(**more), self.clone)
+
+    def test_a_cited_test_and_a_written_test_are_both_pins(self):
+        self.assertEqual(self.problems(), [])
+
+    def test_a_pin_must_name_a_test_that_is_there(self):
+        self.assertIn("has no test method", self.problems(pins=[a_pin(test="OwnerPinTests#missing")])[0])
+        self.assertIn("is not a test file", self.problems(pins=[a_pin(kind="cited", test="GoneTests#x", file=T + "GoneTests.java")], files=[])[0])
+        self.assertIn("writes no file", self.problems(files=[])[0])
+        self.assertIn("not written as TestClass#method", self.problems(pins=[a_pin(test="just a name")])[0])
+        self.assertIn("no pins", self.problems(pins=[], files=[])[0])
+
+    def test_a_written_file_is_new_is_a_test_and_is_labelled_observed(self):
+        file = lambda path, content=JAVA: [{"path": path, "content": content}]
+        self.assertIn("exists", self.problems(pins=[a_pin(test="OwnerTests#exists", file=T + "OwnerTests.java")], files=file(T + "OwnerTests.java"))[0])
+        self.assertIn("not a Java file under", self.problems(files=file("src/main/java/org/example/OwnerPinTests.java"))[0])
+        self.assertIn("not a Java file under", self.problems(files=file("src/test/java/../../../pom.xml"))[0])
+        self.assertIn("observed", self.problems(files=file(T + "OwnerPinTests.java", JAVA.replace('@Tag("observed")', "")))[0])
+        self.assertIn("no pin names it", " ".join(self.problems(files=pin_result()["files"] + file(T + "ExtraTests.java"))))
+
+    def test_the_classes_to_mutate_are_production_classes(self):
+        self.assertIn("not a production class", self.problems(target_classes=[T + "OwnerTests.java"])[0])
+
+    def test_the_files_are_written_and_the_build_is_told_what_to_run(self):
+        got = pins.write(pin_result(), self.clone)
+        self.assertTrue(os.path.isfile(os.path.join(self.clone, T + "OwnerPinTests.java")))
+        self.assertEqual(got, {"tests": "OwnerPinTests#theBirthDateIsShown,OwnerTests#exists",
+                               "suites": "org.example.OwnerPinTests,org.example.OwnerTests", "classes": "org.example.Owner"})
+        with self.assertRaises(SystemExit):
+            pins.write(pin_result(), self.clone)  # the file exists now
+
+    def test_the_reports_say_which_pin_passed_and_which_can_fail(self):
+        reports = os.path.join(self.d.name, "reports")
+        os.makedirs(reports)
+        with open(os.path.join(reports, "TEST-org.example.OwnerPinTests.xml"), "w") as f:
+            f.write('<testsuite><testcase classname="org.example.OwnerPinTests" name="theBirthDateIsShown"/>'
+                    '<testcase classname="org.example.OwnerPinTests" name="weak"><failure message="expected 1" type="AssertionError"/></testcase></testsuite>')
+        test = lambda cls, m: f"org.example.{cls}.[engine:junit-jupiter]/[class:org.example.{cls}]/[method:{m}()]"
+        with open(os.path.join(self.d.name, "mutations.xml"), "w") as f:
+            f.write("<mutations><mutation status='KILLED'><killingTests>" + test("OwnerPinTests", "theBirthDateIsShown") + "</killingTests>"
+                    "<succeedingTests>" + test("OwnerPinTests", "weak") + "</succeedingTests><coveringTests></coveringTests></mutation>"
+                    "<mutation status='SURVIVED'><killingTests></killingTests><succeedingTests>" + test("OwnerPinTests", "weak")
+                    + "|" + test("OwnerPinTests", "theBirthDateIsShown") + "</succeedingTests><coveringTests></coveringTests></mutation></mutations>")
+        r = pin_result(pins=[a_pin(), a_pin("Weak.", test="OwnerPinTests#weak"), a_pin("It exists.", "cited", "OwnerTests#exists", T + "OwnerTests.java")])
+        got = pins.read(r, reports, os.path.join(self.d.name, "mutations.xml"), "no.log")
+        self.assertEqual([(p["ran"], p["mutation"], p["killed"], p["under"]) for p in got["pins"]],
+                         [("passed", "can fail", 1, 2), ("failed", "cannot fail", 0, 2), ("did not run", "not judged", 0, 0)])
+        self.assertEqual(got["mutants"], {"KILLED": 1, "SURVIVED": 1})
+        self.assertEqual([p["mutation"] for p in pins.read(r, reports, "no.xml", "no.log")["pins"]], ["not run"] * 3)
+
+    def test_a_build_that_never_ran_the_tests_says_why(self):
+        log = os.path.join(self.d.name, "build.log")
+        with open(log, "w") as f:
+            f.write("[INFO] compiling\n[ERROR] /x/OwnerPinTests.java:[12,5] cannot find symbol\n")
+        got = pins.read(pin_result(), os.path.join(self.d.name, "none"), "no.xml", log)
+        self.assertFalse(got["built"])
+        self.assertIn("cannot find symbol", got["build_problem"])
+
+
+class UnderstandGate(unittest.TestCase):
+    def run_gate(self, agent=None, sensor=None, why=None, round_=1):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(f"{d}/results")
+            dump(f"{d}/item.json", an_item(round=round_, owner="pat"))
+            if agent:
+                dump(f"{d}/results/pin-agent.json", agent)
+                dump(f"{d}/results/pin-agent.ran.json", {"tool": "Claude Code", "model": "m", "seconds": 90, "turns": 30, "cost_usd": 1.2})
+            if why:
+                with open(f"{d}/results/pin-agent.why", "w") as f:
+                    f.write(why)
+            if sensor:
+                dump(f"{d}/results/mutation-sensor.json", sensor)
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(understand_gate.main([f"{d}/item.json", f"{d}/results", LINE, f"{d}/out"]), 0)
+            return out.getvalue().split()[0], load(f"{d}/out/effects.json")
+
+    def test_pins_that_pass_and_can_fail_advance_the_item_to_shape(self):
+        outcome, effects = self.run_gate(pin_result(), sensor_result(*GOOD_ROWS))
+        self.assertEqual(outcome, "outcome=advance")
+        self.assertEqual(effects["add"], ["stage:shape"])
+        self.assertIn("stage:understand", effects["remove"])
+        self.assertIn("`item-11`", effects["comments"][-1])
+        self.assertIn("1 could not be judged", effects["comments"][-1])
+        self.assertNotIn("class OwnerPinTests", "".join(effects["comments"]))  # the source stays on the branch
+        self.assertEqual(latest(read_results([{"user": {"login": BOT}, "body": c} for c in effects["comments"]]),
+                                "understand", "understand-gate")["branch"], "item-11")
+
+    def test_a_pin_that_fails_or_cannot_fail_goes_back_to_the_agent(self):
+        for sensor, said in ((sensor_result(("OwnerPinTests#theBirthDateIsShown", "failed", "not run")), "expected 1 but was 2"),
+                             (sensor_result(("OwnerPinTests#theBirthDateIsShown", "passed", "cannot fail")), "cannot fail"),
+                             (sensor_result(built=False), "cannot find symbol")):
+            outcome, effects = self.run_gate(pin_result(), sensor)
+            self.assertEqual(outcome, "outcome=return")
+            self.assertIn("Round 2 of 3", effects["comments"][-1])
+            self.assertIn(said, effects["comments"][-1])
+            self.assertEqual(effects["add"], [])
+
+    def test_no_result_from_the_agent_goes_back_to_the_agent(self):
+        outcome, effects = self.run_gate(why="the run did not succeed")
+        self.assertEqual(outcome, "outcome=return")
+        self.assertEqual(len(effects["comments"]), 2)
+
+    def test_the_last_round_ends_stuck(self):
+        outcome, effects = self.run_gate(pin_result(), sensor_result(("OwnerPinTests#theBirthDateIsShown", "passed", "cannot fail")), round_=3)
+        self.assertEqual(outcome, "outcome=stuck")
+        self.assertEqual(effects["add"], ["stuck"])
+
+    def test_missing_evidence_the_agent_cannot_put_right_is_stuck_at_once(self):
+        self.assertEqual(self.run_gate(pin_result())[0], "outcome=stuck")
+        self.assertEqual(self.run_gate(pin_result(), sensor_result(("OwnerPinTests#theBirthDateIsShown", "passed", "not run")))[0],
+                         "outcome=stuck")
+
+    def test_a_suspect_is_filed_as_a_new_item_in_the_forms_shape(self):
+        suspect = {"behavior": "A pet with no birth date shows an empty cell.", "why": "The spec requires a birth date.",
+                   "where": "src/main/java/org/example/Owner.java:1", "quote": "class Owner"}
+        _, effects = self.run_gate(pin_result(suspects=[suspect]), sensor_result(*GOOD_ROWS))
+        filed = effects["file"][0]
+        self.assertEqual(filed["labels"], ["line", "suspect"])
+        got = item.fields(filed["body"])
+        self.assertEqual(got["type"], "Defect")
+        self.assertIn("A pet with no birth date", got["idea"])
+
+
+class Stage(unittest.TestCase):
+    def admitted(self, **more):
+        return {**issue(), "labels": [{"name": n} for n in ("line", "admitted", "stage:understand", "type:technical")],
+                "assignees": [{"login": "pat"}], **more}
+
+    def posted(self, who=BOT):
+        body = "### Classifier agent\n\n" + data_block({"type": "technical"}, "intake", "classifier", 7)
+        return [{"user": {"login": who}, "body": body}]
+
+    def test_an_admitted_item_enters_with_its_type_its_owner_and_what_intake_posted(self):
+        got, intake, why = stage.enter(self.admitted(), self.posted(), POLICY, PEOPLE, 1)
+        self.assertIsNone(why)
+        self.assertEqual((got["type"], got["owner"], got["round"]), ("technical", "pat", 1))
+        self.assertEqual(intake["classifier"], {"type": "technical"})
+        self.assertIsNone(intake["intake-agent"])
+
+    def test_a_comment_that_looks_like_a_result_and_is_not_from_the_workflow_does_not_count(self):
+        self.assertIsNone(stage.enter(self.admitted(), self.posted("mallory"), POLICY, PEOPLE, 1)[1]["classifier"])
+
+    def test_the_first_runs_comments_carry_the_bare_result(self):
+        body = ("### x\n<details><summary>d</summary>\n\n```json\n" + json.dumps({"one_idea": True})
+                + "\n```\n\n</details>\n<!-- line:result stage=intake box=intake-agent run=45193567384 -->")
+        self.assertEqual(latest(read_results([{"user": {"login": BOT}, "body": body}]), "intake", "intake-agent"), {"one_idea": True})
+
+    def test_an_item_that_is_not_admitted_or_is_past_its_rounds_does_not_enter(self):
+        not_admitted = {**self.admitted(), "labels": [{"name": "line"}, {"name": "type:technical"}]}
+        self.assertIn("not admitted", stage.enter(not_admitted, [], POLICY, PEOPLE, 1)[2])
+        self.assertIn("no owner", stage.enter(self.admitted(assignees=[]), [], POLICY, PEOPLE, 1)[2])
+        self.assertIn("Round 4", stage.enter(self.admitted(), [], POLICY, PEOPLE, 4)[2])
+
+    def test_a_returned_item_carries_what_was_wrong(self):
+        with tempfile.TemporaryDirectory() as d:
+            dump(f"{d}/pin-agent.json", pin_result())
+            dump(f"{d}/mutation-sensor.json", sensor_result(("OwnerPinTests#theBirthDateIsShown", "passed", "cannot fail")))
+            got = stage.previous(d, 2)
+            self.assertEqual(got["round"], 1)
+            self.assertIn("cannot fail", got["what_was_wrong"][0])
+            self.assertEqual(got["your_result"]["summary"], "Two pins.")
 
 
 if __name__ == "__main__":

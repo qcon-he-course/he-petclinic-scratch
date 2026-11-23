@@ -26,17 +26,64 @@
     "says": "a defect whose attached test fails as claimed, with the classifier in agreement and no standing decision reversed"
   },
   "labels": {
-    "line": ["0e7490", "An item on the line"],
-    "stage:intake": ["155e75", "The item is at Intake"],
-    "stage:understand": ["155e75", "The item is at Understand"],
-    "type:behavior-change": ["64748b", "Type: behavior change"],
-    "type:defect": ["64748b", "Type: defect"],
-    "type:technical": ["64748b", "Type: technical"],
-    "called:product-owner": ["c2410c", "The line waits for the product owner"],
-    "called:tech-lead": ["c2410c", "The line waits for the tech lead"],
-    "returned": ["c2410c", "Returned to the requester: not ready"],
-    "stuck": ["b91c1c", "A box left no result: rerun the stage"],
-    "admit": ["15803d", "Add this label to admit the item. Whoever admits owns it"],
-    "admitted": ["15803d", "Admitted: the item has an owner"]
+    "line": [
+      "0e7490",
+      "An item on the line"
+    ],
+    "stage:intake": [
+      "155e75",
+      "The item is at Intake"
+    ],
+    "stage:understand": [
+      "155e75",
+      "The item is at Understand"
+    ],
+    "stage:shape": [
+      "155e75",
+      "The item is at Shape"
+    ],
+    "type:behavior-change": [
+      "64748b",
+      "Type: behavior change"
+    ],
+    "type:defect": [
+      "64748b",
+      "Type: defect"
+    ],
+    "type:technical": [
+      "64748b",
+      "Type: technical"
+    ],
+    "called:product-owner": [
+      "c2410c",
+      "The line waits for the product owner"
+    ],
+    "called:tech-lead": [
+      "c2410c",
+      "The line waits for the tech lead"
+    ],
+    "returned": [
+      "c2410c",
+      "Returned to the requester: not ready"
+    ],
+    "stuck": [
+      "b91c1c",
+      "A box left no result: rerun the stage"
+    ],
+    "admit": [
+      "15803d",
+      "Add this label to admit the item. Whoever admits owns it"
+    ],
+    "admitted": [
+      "15803d",
+      "Admitted: the item has an owner"
+    ],
+    "suspect": [
+      "b45309",
+      "Behavior the line saw that looks wrong: a potential defect"
+    ]
+  },
+  "understand": {
+    "max-rounds": 3
   }
 }

@@ -1,0 +1,291 @@
+# Understand, the second stage of the line: today's behavior is pinned before anyone
+# decides what the code should do. No person acts at this stage.
+#
+#   door             lets an admitted item in, and gathers what the agent is given: the
+#                    item, what Intake posted on it and, on a later round, what the
+#                    round before left. No model, no key.
+#   pin-agent        reads the item, the constitution, the code and its tests, and
+#                    returns the pins: tests that exist, cited, and new test files,
+#                    whole. One API key, no shell, no permission to write. It cannot
+#                    run what it writes.
+#   mutation-sensor  writes the agent's files into a checkout, formats them, runs the
+#                    pins, then changes the production code in small ways and runs
+#                    them again: a pin that fails for no mutant protects nothing. It
+#                    runs the agent's code, so it holds no key and cannot write.
+#   understand-gate  posts what the boxes left and applies the policy: advance (the
+#                    pins go to the item's branch, the item moves to Shape), return to
+#                    the agent for another round, or stuck. No model, no key. It runs
+#                    none of the agent's code: it applies a patch and pushes.
+#
+# Started by a dispatch: from Intake when an item is admitted, from this workflow's own
+# gate for the next round, or by hand.
+name: "line: understand"
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: The item's number
+        required: true
+      round:
+        description: The round, 1 unless the gate returned the item to the agent
+        default: "1"
+      previous:
+        description: The run of the round before, when there is one
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: line-understand-${{ inputs.issue }}
+  cancel-in-progress: false
+
+env:
+  ITEM: ${{ inputs.issue }}
+  ROUND: ${{ inputs.round }}
+  PREVIOUS: ${{ inputs.previous }}
+  LINE_BRANCH: line
+
+jobs:
+  door:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    outputs:
+      go: ${{ steps.item.outputs.go }}
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          persist-credentials: false
+      - name: Check the inputs
+        run: |
+          for n in "$ITEM" "$ROUND" "${PREVIOUS:-0}"; do
+            case "$n" in ''|*[!0-9]*) echo "an input is not a number" >&2; exit 1 ;; esac
+          done
+          mkdir -p run/previous
+      - name: Fetch what the round before left
+        if: inputs.previous != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: result-*
+          path: run/previous
+          merge-multiple: true
+          run-id: ${{ inputs.previous }}
+          github-token: ${{ github.token }}
+        continue-on-error: true
+      - name: Let the item in
+        id: item
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM" > run/issue.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$ITEM/comments?per_page=100" \
+            | python3 -c 'import json, sys; json.dump([c for page in json.load(sys.stdin) for c in page], sys.stdout)' > run/comments.json
+          python3 -B .github/line/lib/stage.py understand run/issue.json run/comments.json .github/line run/item "$ROUND" run/previous
+      - name: Mark the item
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B .github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/item/effects.json .github/line
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.item.outputs.go == 'yes'
+        with:
+          name: item
+          path: |
+            run/item/item.json
+            run/item/intake.json
+            run/item/previous.json
+          if-no-files-found: ignore
+          overwrite: true
+
+  pin-agent:
+    needs: door
+    if: needs.door.outputs.go == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the source the line works on
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.LINE_BRANCH }}
+          path: repo
+          persist-credentials: false
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the agent's command-line tool
+        run: npm install --global @anthropic-ai/claude-code@2.1.281
+      - name: Read the code and its tests, and return the pins, with one key and no way to write
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AGENT_MAX_TURNS: "80"
+          AGENT_BUDGET_USD: "3"
+          AGENT_TIME_CAP: "1200"
+        run: ctl/.github/line/lib/agent.sh claude understand/pin-agent repo inputs out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-pin-agent
+          path: |
+            out/pin-agent.json
+            out/pin-agent.why
+            out/pin-agent.ran.json
+          if-no-files-found: ignore
+          overwrite: true
+
+  mutation-sensor:
+    needs: pin-agent
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the source the line works on
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.LINE_BRANCH }}
+          path: repo
+          persist-credentials: false
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: result-pin-agent
+          path: agent
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: repo/pom.xml
+      - name: Write the agent's test files into the checkout
+        id: pins
+        run: python3 -B ctl/.github/line/lib/pins.py write agent/pin-agent.json repo
+      - name: Format them as the project formats its code
+        run: (cd repo && ./mvnw -B -q spring-javaformat:apply) || echo "the formatter ended with $?"
+      - name: Run the pins on today's code
+        env:
+          TESTS: ${{ steps.pins.outputs.tests }}
+        run: |
+          mkdir -p out
+          (cd repo && ./mvnw -B -Dspring-javaformat.skip=true -Dcheckstyle.skip=true test \
+            -Dtest="$TESTS" -Dsurefire.failIfNoSpecifiedTests=false) > out/build.log 2>&1 || echo "the build ended with $?"
+          tail -n 30 out/build.log
+      - name: Change the code in small ways, and run the pins against each change
+        env:
+          SUITES: ${{ steps.pins.outputs.suites }}
+          CLASSES: ${{ steps.pins.outputs.classes }}
+        run: |
+          (cd repo && ./mvnw -B -Dspring-javaformat.skip=true -Dcheckstyle.skip=true -DskipTests=false \
+            org.pitest:pitest-maven:mutationCoverage -DtargetClasses="$CLASSES" -DtargetTests="$SUITES" \
+            -DoutputFormats=XML -DtimestampedReports=false -DfullMutationMatrix=true -DfailWhenNoMutations=false) \
+            > out/pit.log 2>&1 || echo "the mutation run ended with $?"
+          tail -n 15 out/pit.log
+      - name: Read what the runs left, and keep the pins as a patch
+        run: |
+          python3 -B ctl/.github/line/lib/pins.py read agent/pin-agent.json repo repo/target/surefire-reports \
+            repo/target/pit-reports/mutations.xml out/build.log out
+          git -C repo add -N src/test/java
+          git -C repo diff -- src/test/java > out/pins.patch
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-mutation-sensor
+          path: |
+            out/mutation-sensor.json
+            out/pins.patch
+          if-no-files-found: ignore
+          overwrite: true
+
+  understand-gate:
+    needs: [door, pin-agent, mutation-sensor]
+    if: always() && needs.door.outputs.go == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      actions: write
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - name: Fetch what the boxes left
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+        continue-on-error: true
+      - name: Apply the policy
+        id: gate
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p results run
+          ls -l results
+          python3 -B ctl/.github/line/lib/understand_gate.py inputs/item.json results ctl/.github/line run
+      - name: Check out the source the line works on
+        if: steps.gate.outputs.outcome == 'advance'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.LINE_BRANCH }}
+          path: repo
+      # Every write of the line goes to the item's branch. Only test files travel.
+      - name: Put the pins on the item's branch
+        if: steps.gate.outputs.outcome == 'advance'
+        env:
+          BRANCH: ${{ steps.gate.outputs.branch }}
+        run: |
+          cd repo
+          git switch -c "$BRANCH"
+          if [ -s ../results/pins.patch ]; then
+            git apply --index --include='src/test/java/*' ../results/pins.patch
+            if git diff --cached --name-only | grep -v '^src/test/java/'; then
+              echo "the patch touches a file outside src/test/java" >&2; exit 1
+            fi
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Understand: pins for item $ITEM" -m "Tests of what the code does today, labelled observed. Written by the pin-requirements agent, run and checked by the mutation sensor (run $GITHUB_RUN_ID)."
+          fi
+          git push --force origin "$BRANCH"
+      - name: Post the results and the gate's decision on the item
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B ctl/.github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json ctl/.github/line
+      # A dispatch made with this workflow's token starts a workflow. A label does not.
+      - name: Start the next round
+        if: steps.gate.outputs.outcome == 'return'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.gate.outputs.round }}
+        run: |
+          gh workflow run line-understand.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f issue="$ITEM" -f round="$NEXT" -f previous="$GITHUB_RUN_ID"

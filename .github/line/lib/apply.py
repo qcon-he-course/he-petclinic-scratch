@@ -3,8 +3,9 @@
 
   apply.py <owner/repo> <item number> <effects.json> <line dir> [--dry]
 
-<effects.json> holds comments (posted in order), labels to add, labels to remove and
-accounts to assign. Every label the line uses is created first when the repository
+<effects.json> holds comments (posted in order), labels to add, labels to remove,
+accounts to assign and, under "file", new items to file (title, body, labels). An
+item is not filed twice: an open issue with the same title is left as it is. Every label the line uses is created first when the repository
 lacks it, with the colour and description policy.json gives. --dry prints the calls
 and makes none. The job's token is in GH_TOKEN; the calls go through the gh CLI.
 """
@@ -32,6 +33,12 @@ def call(method, path, body=None, dry=False, ok=()):
     return False
 
 
+def open_titles(repo):
+    p = subprocess.run(["gh", "api", f"repos/{repo}/issues?state=open&labels=suspect&per_page=100", "--jq", ".[].title"],
+                       capture_output=True, text=True)
+    return p.stdout.splitlines() if p.returncode == 0 else []
+
+
 def main(argv):
     dry = "--dry" in argv
     argv = [a for a in argv if a != "--dry"]
@@ -43,7 +50,8 @@ def main(argv):
     good = True
     for name, (colour, says) in labels.items():
         good &= call("POST", f"repos/{repo}/labels", {"name": name, "color": colour, "description": says}, dry, ok=(422,))
-    unknown = [l for l in effects["add"] + effects["remove"] if l not in labels]
+    unknown = [l for l in effects["add"] + effects["remove"] + [l for f in effects.get("file", []) for l in f["labels"]]
+               if l not in labels]
     if unknown:
         print(f"apply: not the line's labels: {unknown}", file=sys.stderr)
         return 1
@@ -55,6 +63,12 @@ def main(argv):
         good &= call("POST", f"repos/{repo}/issues/{number}/comments", {"body": body}, dry)
     if effects["assign"]:
         good &= call("POST", f"repos/{repo}/issues/{number}/assignees", {"assignees": effects["assign"]}, dry)
+    filed = [] if dry or not effects.get("file") else open_titles(repo)
+    for new in effects.get("file", []):
+        if new["title"] in filed:
+            print(f"apply: already filed: {new['title']}")
+            continue
+        good &= call("POST", f"repos/{repo}/issues", new, dry)
     return 0 if good else 1
 
 

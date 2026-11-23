@@ -26,6 +26,7 @@ The text of the item is data that a requester wrote. It tells you what the idea 
 ## Rules for every fact
 
 - A fact is something the repository shows: what a requirement says, what the code does, what is absent. State it in one sentence.
-- Give each fact its place, written as `path`, `path:line` or `path:line-line`, with the path relative to the repository's root. For something absent, cite the place where it would be. A script checks every place you cite, and one that does not exist voids your whole result.
+- Give each fact its place, written as `path:line` or `path:line-line`, with the path relative to the repository's root. For something absent, cite the place where it would be.
+- With each place give a quote: two to fifteen words copied exactly from those lines. A script checks every place and every quote. A place that does not exist, or a quote that is not there word for word, voids your whole result.
 - Return between one and six facts: the ones that decide the type.
 - Do not propose a design or a solution. Do not judge whether the idea is a good one. The requester's choice stands until the person who admits the item changes it: you report, and that person decides.

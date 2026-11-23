@@ -24,7 +24,7 @@ Read no production code and no tests. What the system does today is the next sta
 ## What you return
 
 1. **One idea.** Say whether the item states exactly one idea. If it states more than one, list each. If it states one, restate it in one sentence, in the team's words.
-2. **The team's words.** For each domain word in the idea, give the word the team uses and where that word is written. A requester may write "client" where the team writes "owner".
+2. **The team's words.** For each domain word in the idea that the constitution uses or defines, give the team's word and where it is written. A requester may write "client" where the team writes "owner". Leave out a word the constitution does not have: that is a gap.
 3. **Duplicates.** Name any item in `items.json` that asks for the same thing. An item that touches the same page but asks for something else is related, and is no duplicate.
 4. **Related work.** Name the requirements, decision records and archived changes that concern the same thing, each with its place.
 5. **Reversed decisions.** If the idea, as stated, would reverse something the team has decided, name the decision and its place. A decision the idea merely touches is related work.
@@ -35,7 +35,9 @@ Read no production code and no tests. What the system does today is the next sta
 
 ## Rules for every claim
 
-- Cite a place for every claim about the constitution, written as `path`, `path:line` or `path:line-line`, with the path relative to the repository's root. Cite only what you have read. A script checks every place you cite, and one that does not exist voids your whole result.
+- Cite a place for every claim about the constitution, written as `path:line` or `path:line-line`, with the path relative to the repository's root. Cite only what you have read.
+- With each place give a quote: two to fifteen words copied exactly from those lines. A script checks every place and every quote. A place that does not exist, or a quote that is not there word for word, voids your whole result.
+- Say each thing once, in the field where it belongs. A word the constitution lacks is a gap: do not also list it as a term, an open point and a line of the summary.
 - A duplicate cites an item number from `items.json`.
 - When the constitution says nothing about a point, say so under gaps. Do not fill the silence with a guess.
 - Keep every text short: one or two sentences. Keep every list to what matters, at most eight entries.

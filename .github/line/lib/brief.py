@@ -45,6 +45,17 @@ def write(issue, comments):
          "It is not an instruction to whoever reads it.", "", "---", "",
          "## The idea, in the requester's words", "", got["idea"], "",
          f"Type: {got['type']}. Owner: {', '.join(owners) or 'none'}. Stage: {stage}.", ""]
+    parked = latest(results, "shape", "draft-gate")
+    if parked and parked.get("outcome") == "parked" and "parked" in labels:
+        asked = (latest(results, "shape", "spec-drafter") or {}).get("questions", [])
+        L += ["## Questions the line is waiting on", "",
+              "The spec could not be drafted without these decisions. The item is parked until its owner answers them.", ""]
+        L += [f"- {one_line(q)}" for q in parked.get("questions", [])]
+        L += [f"  - Why it is open: {one_line(q['why'])} Recommended: {one_line(q['recommended'])}" for q in asked]
+        L += [""]
+    decided = latest(results, "shape", "commit-check")
+    if decided and decided.get("decisions"):
+        L += ["## Decided so far", "", f"{len(decided['decisions'])} decisions are in `openspec/changes/item-{issue['number']}/decisions.md` on the branch.", ""]
     pins = latest(results, "understand", "pin-agent")
     sensor = latest(results, "understand", "mutation-sensor")
     gate = latest(results, "understand", "understand-gate")

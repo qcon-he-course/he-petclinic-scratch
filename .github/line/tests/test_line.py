@@ -22,7 +22,10 @@ import gate  # noqa: E402
 import item  # noqa: E402
 import pins  # noqa: E402
 import brief  # noqa: E402
+import draft  # noqa: E402
+import draft_gate  # noqa: E402
 import proof  # noqa: E402
+import spec_check  # noqa: E402
 import shape_answered  # noqa: E402
 import shape_check  # noqa: E402
 import stage  # noqa: E402
@@ -107,7 +110,9 @@ class Item(unittest.TestCase):
             self.assertTrue(set(effects["add"] + effects["remove"]) <= set(POLICY["labels"]))
 
 
-class Check(unittest.TestCase):
+class CheckFixture:
+    """A small clone and an inputs folder, and a way to run lib/check.py on a raw result."""
+
     def setUp(self):
         self.d = tempfile.TemporaryDirectory()
         self.clone, self.inputs, self.out = (os.path.join(self.d.name, n) for n in ("clone", "inputs", "out"))
@@ -124,12 +129,15 @@ class Check(unittest.TestCase):
     def run_check(self, box, raw):
         dump(os.path.join(self.d.name, "raw.json"), raw)
         with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
-            folder = "understand" if box == "pin-agent" else "intake"
+            folder = {"pin-agent": "understand", "spec-drafter": "shape", "spec-reviewer": "shape"}.get(box, "intake")
             code = check.main([box, os.path.join(LINE, folder, f"{box}.schema.json"), os.path.join(self.d.name, "raw.json"),
                                self.clone, self.inputs, self.out])
         why = os.path.join(self.out, f"{box}.why")
         return code, text(why) if os.path.exists(why) else ""
 
+
+
+class Check(CheckFixture, unittest.TestCase):
     def test_a_place_must_exist_in_the_clone(self):
         self.assertIsNone(check.where_problem("docs/baseline.md", self.clone))
         self.assertIsNone(check.where_problem("docs/baseline.md:2-3", self.clone))
@@ -207,7 +215,8 @@ class Check(unittest.TestCase):
                     walk(sub, f"{at}.{k}")
             elif s.get("type") == "array":
                 walk(s["items"], at + "[]")
-        for stage_, box in (("intake", "intake-agent"), ("intake", "classifier"), ("understand", "pin-agent")):
+        for stage_, box in (("intake", "intake-agent"), ("intake", "classifier"), ("understand", "pin-agent"),
+                            ("shape", "spec-drafter"), ("shape", "spec-reviewer")):
             walk(load(os.path.join(LINE, stage_, f"{box}.schema.json")), box)
 
 
@@ -778,6 +787,332 @@ class Brief(unittest.TestCase):
                      "under mutation: can fail", "`item-11`", "Labels are not pinned.", "The word age is new.", "It is data about the item."):
             self.assertIn(said, text_)
         self.assertNotIn("Ignore the owner.", text_)
+
+
+PROPOSAL = """# Proposal
+
+## Why
+
+Reception works out a pet's age by hand.
+
+## What Changes
+
+- The owner's page shows the age (D1).
+
+## Capabilities
+
+### Modified Capabilities
+
+- `pets`: adds the age on the owner's page.
+
+## Impact
+
+The owner's page template. {impact}
+{extra}"""
+SPEC = """# Spec Delta
+
+## ADDED Requirements
+
+### Requirement: The owner's page shows the age
+
+The system SHALL show each pet's age in whole years.
+
+#### Scenario: A pet three years old
+
+- **WHEN** a pet born three years before today is shown
+- **THEN** its age is "3 years"
+- **CHECKED AT** unit
+- **DECIDED BY** D1
+"""
+LOG2 = LOG.replace("- **D1** The age is shown in whole years.", "- **D1** The age is shown in whole years. Changes pin: OwnerPinTests#theOrder.") \
+    .replace("\n## Facts", "- **D2** The word is Age. Asked as Q2, answered 2026-11-23.\n\n## Facts")
+ROOT7 = "openspec/changes/item-7/"
+
+
+class Spec(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.clone = self.d.name
+        self.put("decisions.md", LOG2)
+        self.put("proposal.md", PROPOSAL.format(impact="It changes the pin `OwnerPinTests#theOrder`.",
+                                                 extra="\n## Decisions with no scenario\n\n- **D2** A word in the glossary.\n"))
+        self.put("specs/pets/spec.md", SPEC)
+
+    def tearDown(self):
+        self.d.cleanup()
+
+    def put(self, name, body):
+        full = os.path.join(self.clone, ROOT7, name)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(body)
+
+    def gaps(self):
+        return " | ".join(spec_check.check_files(self.clone, 7)["gaps"])
+
+    def test_a_draft_in_the_templates_form_that_shows_every_decision_is_complete(self):
+        got = spec_check.check_files(self.clone, 7)
+        self.assertTrue(got["passed"], got["gaps"])
+        self.assertEqual((got["scenarios"], got["decisions"], got["decisions_with_no_scenario"]), (1, 2, ["D2"]))
+
+    def test_every_decision_is_in_a_scenario_or_listed_with_a_reason(self):
+        self.put("proposal.md", PROPOSAL.format(impact="It changes the pin `OwnerPinTests#theOrder`.", extra=""))
+        self.assertIn("D2 is in no scenario's DECIDED BY", self.gaps())
+        self.put("specs/pets/spec.md", SPEC.replace("**DECIDED BY** D1", "**DECIDED BY** D1, D9"))
+        self.assertIn("the log has no D9", self.gaps())
+
+    def test_a_pin_a_decision_changes_is_named_in_the_impact(self):
+        self.put("proposal.md", PROPOSAL.format(impact="", extra="\n## Decisions with no scenario\n\n- **D2** A word.\n"))
+        self.assertIn("changes the pin OwnerPinTests#theOrder", self.gaps())
+
+    def test_the_templates_form_is_held(self):
+        for name, body, said in (
+                ("proposal.md", PROPOSAL.format(impact="x y z", extra="").replace("## Why", "## Reasons"), "no section \"## Why\""),
+                ("proposal.md", PROPOSAL.format(impact="<!-- Affected code -->", extra=""), "comment from the template"),
+                ("specs/pets/spec.md", SPEC.replace("# Spec Delta", "# Spec"), "does not start with"),
+                ("specs/pets/spec.md", SPEC.replace("## ADDED Requirements", "## Requirements"), "no section of ADDED"),
+                ("specs/pets/spec.md", SPEC.replace("SHALL show", "shows"), "does not say SHALL or MUST"),
+                ("specs/pets/spec.md", SPEC.split("#### Scenario")[0], "has no scenario"),
+                ("specs/pets/spec.md", SPEC.replace("- **THEN** its age is \"3 years\"\n", ""), "has no THEN"),
+                ("specs/pets/spec.md", SPEC.replace("**CHECKED AT** unit", "**CHECKED AT** somewhere"), "needs one CHECKED AT"),
+                ("specs/pets/spec.md", SPEC.replace("- **DECIDED BY** D1\n", ""), "needs one DECIDED BY"),
+                ("specs/pets/spec.md", SPEC + SPEC.split("## ADDED Requirements")[1].replace("The owner's page shows the age", "Again"), "used more than once")):
+            self.setUp()
+            self.put(name, body)
+            self.assertIn(said, self.gaps(), said)
+
+    def test_a_draft_with_no_spec_or_no_proposal_is_not_one(self):
+        os.remove(os.path.join(self.clone, ROOT7, "specs/pets/spec.md"))
+        os.remove(os.path.join(self.clone, ROOT7, "proposal.md"))
+        self.assertIn("no proposal.md", self.gaps())
+        self.assertIn("no delta spec", self.gaps())
+
+    def test_the_drafters_files_are_written_only_inside_the_draft(self):
+        good = {"files": [{"path": ROOT7 + "proposal.md", "content": "x"}, {"path": ROOT7 + "specs/pets/spec.md", "content": "y"}]}
+        draft.write(good, self.clone, 7)
+        for path in (ROOT7 + "decisions.md", "GLOSSARY.md", ROOT7 + "specs/../../../../pom.xml", "src/main/java/A.java", ROOT7 + "tasks.md"):
+            with self.assertRaises(SystemExit):
+                draft.write({"files": [{"path": path, "content": "x"}]}, self.clone, 7)
+
+
+def a_draft(**more):
+    return {"files": [{"path": ROOT7 + "proposal.md", "content": "p\n"}, {"path": ROOT7 + "specs/pets/spec.md", "content": "s\n"}],
+            "resolved": [], "questions": [], "summary": "A draft.", **more}
+
+
+def a_finding(**more):
+    return {"id": "S1", "kind": "decision not shown", "against": "D1", "claim": "D1 names two cases and one has a scenario.",
+            "where": ROOT7 + "specs/pets/spec.md:1", "quote": "# Spec Delta", "needs_decision": False, **more}
+
+
+COMPLETE = {"passed": True, "gaps": [], "scenarios": 4, "specs": [ROOT7 + "specs/pets/spec.md"], "decisions": 2,
+            "decisions_with_no_scenario": [], "head": "abc"}
+
+
+class DraftGate(unittest.TestCase):
+    def run_gate(self, drafter=None, check=None, reviewer=None, round_=1, why=None, head="abc"):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(f"{d}/results")
+            dump(f"{d}/item.json", an_item(number=7, round=round_, owner="pat", checked_head=head))
+            for name, value in (("spec-drafter.json", drafter), ("completeness.json", check), ("spec-reviewer.json", reviewer)):
+                if value is not None:
+                    dump(f"{d}/results/{name}", value)
+            if why:
+                with open(f"{d}/results/spec-drafter.why", "w") as f:
+                    f.write(why)
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(draft_gate.main([f"{d}/item.json", f"{d}/results", LINE, f"{d}/out"]), 0)
+            effects = load(f"{d}/out/effects.json")
+            self.assertTrue(set(effects["add"] + effects["remove"]) <= set(POLICY["labels"]))
+            return out.getvalue().split()[0], effects
+
+    def test_a_complete_draft_with_no_finding_and_no_question_is_reviewed(self):
+        outcome, effects = self.run_gate(a_draft(), COMPLETE, {"findings": [], "summary": "Fine."})
+        self.assertEqual(outcome, "outcome=reviewed")
+        self.assertEqual(effects["add"], ["draft-reviewed"])
+        self.assertEqual(len(effects["comments"]), 4)
+
+    def test_gaps_and_findings_go_back_to_the_drafter(self):
+        gaps = {**COMPLETE, "passed": False, "gaps": ["D2 is in no scenario's DECIDED BY"]}
+        outcome, effects = self.run_gate(a_draft(), gaps)
+        self.assertEqual(outcome, "outcome=return")
+        self.assertIn("D2 is in no scenario", effects["comments"][-1])
+        self.assertEqual(len(effects["comments"]), 3)  # no reviewer on an incomplete draft
+        outcome, effects = self.run_gate(a_draft(), COMPLETE, {"findings": [a_finding()], "summary": "One."})
+        self.assertEqual(outcome, "outcome=return")
+        self.assertIn("S1 (decision not shown, against D1)", effects["comments"][-1])
+        self.assertEqual(self.run_gate(why="the run did not succeed")[0], "outcome=return")
+
+    def test_a_question_parks_the_item_and_calls_the_owner(self):
+        asks = a_draft(questions=[{"question": "Is a pet of 12 months shown as 1 year?", "why": "D3 and D8 differ.", "recommended": "Yes."}])
+        outcome, effects = self.run_gate(asks, COMPLETE, {"findings": [], "summary": "Fine."})
+        self.assertEqual(outcome, "outcome=parked")
+        self.assertEqual(effects["add"], ["parked"])
+        self.assertIn("answered", effects["remove"])
+        self.assertIn("@pat", effects["comments"][-1])
+        self.assertIn("Is a pet of 12 months shown as 1 year?", effects["comments"][-1])
+
+    def test_at_the_last_round_a_standing_finding_is_a_question_for_a_person_and_a_standing_gap_is_stuck(self):
+        outcome, effects = self.run_gate(a_draft(), COMPLETE, {"findings": [a_finding()], "summary": "One."}, round_=3)
+        self.assertEqual(outcome, "outcome=parked")
+        self.assertIn("do not agree on S1", effects["comments"][-1])
+        gaps = {**COMPLETE, "passed": False, "gaps": ["a gap"]}
+        outcome, effects = self.run_gate(a_draft(), gaps, round_=3)
+        self.assertEqual(outcome, "outcome=stuck")
+        self.assertIn("used up", effects["comments"][-1])
+
+    def test_missing_evidence_and_a_branch_that_moved_are_stuck(self):
+        self.assertEqual(self.run_gate(a_draft())[0], "outcome=stuck")
+        self.assertEqual(self.run_gate(a_draft(), COMPLETE)[0], "outcome=stuck")
+        outcome, effects = self.run_gate(a_draft(), COMPLETE, {"findings": [], "summary": "Fine."}, head="other")
+        self.assertEqual(outcome, "outcome=stuck")
+        self.assertIn("moved after the commit check", effects["comments"][-1])
+
+
+class DraftDoor(unittest.TestCase):
+    def answered(self, *labels):
+        return {**issue(), "labels": [{"name": n} for n in labels or ("line", "stage:shape", "answered", "type:behavior-change")],
+                "assignees": [{"login": "pat"}]}
+
+    def posted(self, stage_, box, result, run=5):
+        return {"user": {"login": BOT}, "body": "x\n" + data_block(result, stage_, box, run)}
+
+    def comments(self, passed=True):
+        return [self.posted("understand", "pin-agent", pin_result()),
+                self.posted("shape", "commit-check", {"passed": passed, "head": "abc", "decisions": [{"id": "D1", "text": "t"}]})]
+
+    def test_an_answered_item_whose_decisions_passed_the_check_enters_with_its_pins(self):
+        got, pins_, why = stage.enter_draft(self.answered(), self.comments(), POLICY, PEOPLE, 1)
+        self.assertIsNone(why)
+        self.assertEqual((got["owner"], got["checked_head"], got["decisions"], got["round"]), ("pat", "abc", 1, 1))
+        self.assertEqual([p["test"] for p in pins_], ["OwnerPinTests#theBirthDateIsShown", "OwnerTests#exists"])
+
+    def test_it_does_not_enter_unanswered_unchecked_or_past_its_rounds(self):
+        self.assertIn("not marked it answered", stage.enter_draft(self.answered("line", "stage:shape"), self.comments(), POLICY, PEOPLE, 1)[2])
+        self.assertIn("has not passed", stage.enter_draft(self.answered(), self.comments(passed=False), POLICY, PEOPLE, 1)[2])
+        self.assertIn("has not passed", stage.enter_draft(self.answered(), [], POLICY, PEOPLE, 1)[2])
+        self.assertIn("Round 4", stage.enter_draft(self.answered(), self.comments(), POLICY, PEOPLE, 4)[2])
+
+    def test_the_drafter_starts_from_the_run_that_parked_the_item(self):
+        parked = self.comments() + [self.posted("shape", "draft-gate", {"outcome": "parked", "questions": ["q"]}, run=4711)]
+        self.assertEqual(stage.plan_draft(parked, ""), "4711")
+        self.assertEqual(stage.plan_draft(parked, "99"), "99")
+        self.assertEqual(stage.plan_draft(self.comments(), ""), "")
+        reviewed = parked + [self.posted("shape", "draft-gate", {"outcome": "reviewed"}, run=4712)]
+        self.assertEqual(stage.plan_draft(reviewed, ""), "")
+
+    def test_what_the_earlier_run_left_goes_to_the_drafter(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(stage.previous_draft(d, 1))
+            dump(f"{d}/spec-drafter.json", a_draft(questions=[{"question": "q", "why": "w", "recommended": "r"}]))
+            dump(f"{d}/completeness.json", {**COMPLETE, "gaps": ["a gap"]})
+            dump(f"{d}/spec-reviewer.json", {"findings": [a_finding()], "summary": "One."})
+            got = stage.previous_draft(d, 2)
+            self.assertEqual((got["round"], got["gaps"], got["findings"][0]["id"], got["questions_you_asked"][0]["question"]), (1, ["a gap"], "S1", "q"))
+            self.assertTrue(got["your_draft_was_accepted"])
+
+    def test_the_brief_of_a_parked_item_leads_with_the_questions(self):
+        asks = a_draft(questions=[{"question": "Is 12 months 1 year?", "why": "D3 and D8 differ.", "recommended": "Yes."}])
+        comments = self.comments() + [self.posted("shape", "spec-drafter", asks),
+                                      self.posted("shape", "draft-gate", {"outcome": "parked", "questions": ["Is 12 months 1 year?"]})]
+        text_ = brief.write(self.answered("line", "stage:shape", "parked"), comments)
+        self.assertIn("## Questions the line is waiting on", text_)
+        self.assertIn("Is 12 months 1 year?", text_)
+        self.assertIn("D3 and D8 differ.", text_)
+        self.assertLess(text_.index("Questions the line is waiting on"), text_.index("## Pins"))
+
+
+class DraftResults(CheckFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        dump(os.path.join(self.inputs, "item.json"), an_item(number=7))
+        os.makedirs(os.path.join(self.clone, ROOT7, "specs/pets"))
+        with open(os.path.join(self.clone, ROOT7, "specs/pets/spec.md"), "w") as f:
+            f.write("# Spec Delta\n\n## ADDED Requirements\n")
+
+    def test_a_draft_is_a_proposal_and_a_delta_spec_in_the_items_change_folder(self):
+        self.assertEqual(self.run_check("spec-drafter", a_draft())[0], 0)
+        self.assertIn("is not a file of the draft", self.run_check("spec-drafter", a_draft(files=a_draft()["files"] + [{"path": "pom.xml", "content": "x"}]))[1])
+        self.assertIn("at least one delta spec", self.run_check("spec-drafter", a_draft(files=a_draft()["files"][:1]))[1])
+
+    def test_a_finding_has_its_own_id_and_quotes_the_draft(self):
+        review = lambda *fs: {"findings": list(fs), "summary": "s"}
+        self.assertEqual(self.run_check("spec-reviewer", review(a_finding()))[0], 0)
+        self.assertEqual(self.run_check("spec-reviewer", review())[0], 0)
+        self.assertIn("used twice", self.run_check("spec-reviewer", review(a_finding(), a_finding()))[1])
+        self.assertIn("not S<number>", self.run_check("spec-reviewer", review(a_finding(id="one")))[1])
+        self.assertIn("is not in the draft", self.run_check("spec-reviewer", review(a_finding(where="docs/baseline.md:1-3", quote="one two three")))[1])
+        self.assertIn("is not at", self.run_check("spec-reviewer", review(a_finding(quote="not in the draft at all")))[1])
+
+
+STUB = """#!/bin/sh
+# A stand-in for the claude command: prints the next canned result.
+n=$(cat "$STUB_DIR/calls" 2> /dev/null || echo 0); n=$((n + 1)); echo "$n" > "$STUB_DIR/calls"
+cat "$STUB_DIR/result-$n.json"
+"""
+
+
+class AgentRunner(unittest.TestCase):
+    """agent.sh with a stand-in for the claude command, so no model and no key is used."""
+
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        d = self.d.name
+        for folder in ("bin", "clone", "inputs", "stub"):
+            os.makedirs(os.path.join(d, folder))
+        with open(f"{d}/bin/claude", "w") as f:
+            f.write(STUB)
+        os.chmod(f"{d}/bin/claude", 0o755)
+        subprocess.run(["git", "-C", f"{d}/clone", "init", "-q"], check=True)
+        with open(f"{d}/clone/README.md", "w") as f:
+            f.write("Spring PetClinic sample\n")
+        subprocess.run(["git", "-C", f"{d}/clone", "add", "-A"], check=True)
+        dump(f"{d}/inputs/item.json", an_item())
+        dump(f"{d}/inputs/items.json", [])
+
+    def tearDown(self):
+        self.d.cleanup()
+
+    def canned(self, n, related_quote, cost):
+        result = agent_result(related=[{"where": "README.md:1", "why": "w", "quote": related_quote}])
+        dump(f"{self.d.name}/stub/result-{n}.json", {"type": "result", "subtype": "success", "is_error": False, "num_turns": 5,
+                                                       "total_cost_usd": cost, "structured_output": result})
+
+    def run_agent(self):
+        d = self.d.name
+        env = {**os.environ, "PATH": f"{d}/bin:{os.environ['PATH']}", "STUB_DIR": f"{d}/stub", "ANTHROPIC_API_KEY": "not-a-key"}
+        return subprocess.run(["bash", os.path.join(LINE, "lib", "agent.sh"), "claude", "intake/intake-agent", f"{d}/clone", f"{d}/inputs", f"{d}/out"],
+                              env=env, capture_output=True, text=True)
+
+    def test_a_refused_result_goes_back_to_the_agent_once_with_the_reasons(self):
+        self.canned(1, "a quote that is not there", 0.25)
+        self.canned(2, "Spring PetClinic sample", 0.5)
+        p = self.run_agent()
+        d = self.d.name
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(text(f"{d}/stub/calls").strip(), "2")
+        self.assertTrue(os.path.isfile(f"{d}/out/intake-agent.json"))
+        self.assertFalse(os.path.exists(f"{d}/out/intake-agent.why"))
+        self.assertFalse(os.path.exists(f"{d}/inputs/refused.json"))
+        self.assertIn("refused.json", text(f"{d}/out/prompt.txt"))
+        ran = load(f"{d}/out/intake-agent.ran.json")
+        self.assertEqual((ran["tries"], ran["turns"], ran["cost_usd"]), (2, 10, 0.75))
+
+    def test_a_result_refused_twice_is_no_result(self):
+        self.canned(1, "a quote that is not there", 0.25)
+        self.canned(2, "still not there at all", 0.25)
+        p = self.run_agent()
+        d = self.d.name
+        self.assertEqual(p.returncode, 1)
+        self.assertEqual(text(f"{d}/stub/calls").strip(), "2")
+        self.assertIn("is not at", text(f"{d}/out/intake-agent.why"))
+        self.assertTrue(os.path.isfile(f"{d}/out/intake-agent.rejected.json"))
+
+    def test_a_good_result_is_taken_at_the_first_try(self):
+        self.canned(1, "Spring PetClinic sample", 0.25)
+        self.assertEqual(self.run_agent().returncode, 0)
+        self.assertEqual(text(f"{self.d.name}/stub/calls").strip(), "1")
+        self.assertEqual(load(f"{self.d.name}/out/intake-agent.ran.json")["tries"], 1)
 
 
 if __name__ == "__main__":

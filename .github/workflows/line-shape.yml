@@ -1,5 +1,6 @@
-# Shape, the third stage of the line. Built so far: part one, where the item's owner
-# decides in an attended session, outside the orchestrator.
+# Shape, the third stage of the line: part one, where the item's owner decides in an
+# attended session, outside the orchestrator. Part two, the draft, is in
+# line-shape-draft.yml, and a passing check here starts it.
 #
 # The session writes the owner's decisions to the item's branch: a decisions log, the
 # glossary and, rarely, a decision record. A script, lib/shape_check.py, says whether
@@ -38,6 +39,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      actions: write
     steps:
       - name: Check out the line's scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,6 +56,7 @@ jobs:
           persist-credentials: false
         continue-on-error: true
       - name: Run the commit check on the branch
+        id: check
         env:
           GH_TOKEN: ${{ github.token }}
           SENDER: ${{ github.event.sender.login }}
@@ -64,3 +67,10 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM" > run/issue.json
           python3 -B ctl/.github/line/lib/shape_answered.py run/issue.json "$SENDER" repo "origin/$LINE_BRANCH" ctl/.github/line run/effects.json
           python3 -B ctl/.github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json ctl/.github/line
+      # The answered item starts the spec-drafter. A label set with this workflow's
+      # token starts no workflow. A dispatch does.
+      - name: Start the draft
+        if: steps.check.outputs.passed == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run line-shape-draft.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f issue="$ITEM"

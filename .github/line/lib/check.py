@@ -22,7 +22,9 @@ Beyond the schema, a result is held to what a script can check:
   - the lists and the texts have a size a person can read;
   - the result does not contradict itself (one idea and two ideas; agrees and differs);
   - a pin names a test that exists or a test the result itself writes, in a new file
-    under src/test/java, labelled observed.
+    under src/test/java, labelled observed;
+  - a draft spec is a proposal and at least one delta spec, in the item's change folder;
+  - a reviewer's finding has an id of its own and cites the draft.
 """
 import os
 import re
@@ -174,6 +176,25 @@ def box_problems(box, r, clone, inputs):
     if box == "pin-agent":
         quoted = [(e["where"], e["quote"]) for k in ("pins", "suspects") for e in r[k]]
         out += pin_problems(r, clone)
+    elif box == "spec-drafter":
+        number = load(os.path.join(inputs, "item.json"))["number"]
+        paths = [f["path"] for f in r["files"]]
+        root = f"openspec/changes/item-{number}/"
+        spec = re.compile(re.escape(root) + r"specs/[a-z0-9][a-z0-9/-]*/spec\.md")
+        out += [f"{p!r} is not a file of the draft: proposal.md or specs/<capability>/spec.md under {root}"
+                for p in paths if p != root + "proposal.md" and not spec.fullmatch(p)]
+        if len(set(paths)) != len(paths):
+            out.append("a file is written twice")
+        if root + "proposal.md" not in paths or not any(spec.fullmatch(p) for p in paths):
+            out.append("the draft is a proposal.md and at least one delta spec, each returned whole")
+    elif box == "spec-reviewer":
+        number = load(os.path.join(inputs, "item.json"))["number"]
+        quoted = [(f["where"], f["quote"]) for f in r["findings"]]
+        ids = [f["id"] for f in r["findings"]]
+        out += [f"finding id {i!r} is not S<number>" for i in ids if not re.fullmatch(r"S[0-9]+", i)]
+        out += [f"finding id {i} is used twice" for i in sorted({i for i in ids if ids.count(i) > 1})]
+        out += [f"{f['id']} cites {f['where']!r}, which is not in the draft" for f in r["findings"]
+                if not f["where"].startswith(f"openspec/changes/item-{number}/")]
     elif box == "intake-agent":
         quoted = [(e["where"], e["quote"]) for k in ("terms", "related", "reversed_decisions") for e in r[k]]
         if r["one_idea"] and len(r["ideas"]) != 1:

@@ -9,7 +9,8 @@ import re
 BOXES = ["intake-agent", "intake-check", "classifier"]
 BOX_NAMES = {"intake-agent": "Intake agent", "intake-check": "Intake check", "classifier": "Classifier agent",
              "admission-gate": "Admission gate", "pin-agent": "Pin-requirements agent", "mutation-sensor": "Mutation sensor",
-             "understand-gate": "Understand gate", "commit-check": "Commit check"}
+             "understand-gate": "Understand gate", "commit-check": "Commit check", "spec-drafter": "Spec-drafter agent",
+             "completeness-check": "Completeness check", "spec-reviewer": "Reviewer", "draft-gate": "Draft gate"}
 MARK = "<!-- line:result stage={stage} box={box} run={run} -->"
 MARK_RE = re.compile(r"<!-- line:result stage=([a-z-]+) box=([a-z-]+) run=(\w+) -->\s*$")
 BOT = "github-actions[bot]"
@@ -74,6 +75,8 @@ def ran_line(ran):
         parts.append(f"${ran['cost_usd']:.2f}")
     if ran.get("seconds") is not None:
         parts.append(f"{ran['seconds']} s")
+    if (ran.get("tries") or 1) > 1:
+        parts.append(f"{ran['tries']} tries")
     return ", ".join(parts)
 
 

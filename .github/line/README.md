@@ -2,7 +2,7 @@
 
 The delivery line from Week 5's blueprint, tried on this repository. An item is an issue. The orchestrator is GitHub Actions. The source the line works on is the branch `line`, cut from the commit before PC-303 was merged, so that PC-303 can go down the line from its one sentence.
 
-Built so far: **Intake**, **Understand** and **Shape, part one**. Shape's parts two and three and the other five stages are not built.
+Built so far: **Intake**, **Understand** and **Shape, parts one and two**. Shape's part three and the other five stages are not built.
 
 ## Intake
 
@@ -58,6 +58,27 @@ The workflow is `.github/workflows/line-understand.yml`. Admission starts it wit
 3. The check allows a commit to change only those files, and holds the log to its form. The hook runs it before each commit, and `git commit --no-verify` skips it.
 4. The owner adds the label `answered`. The job checks that they are the item's owner, then runs the check on every commit of the branch since Understand's pins, and requires that no question is open. A pass lists the decisions on the item. A failure takes the label off again.
 
+## Shape, part two
+
+| Box on the slide | Here | Model | May write |
+|---|---|---|---|
+| Spec-drafter agent | job `spec-drafter`: Claude Code, headless, no shell | Claude | nothing |
+| Completeness check | job `completeness-check`: `lib/spec_check.py` | none | nothing |
+| Reviewer | job `reviewer`: Codex, read-only sandbox, a fresh session | OpenAI | nothing |
+| Resolves, or asks; the owner decides when asked | job `draft-gate`: `lib/draft_gate.py`, then a push | none | the issue, the branch |
+
+The workflow is `.github/workflows/line-shape-draft.yml`. A passing commit check starts it with a dispatch.
+
+1. The drafter reads the decisions log, the glossary, the pins and the templates in `openspec/schemas/baseline/templates/` on the item's branch, and returns `proposal.md` and each delta spec, whole. Every scenario carries `CHECKED AT <level>` and `DECIDED BY <decisions>`.
+2. The completeness check writes the draft into a checkout and holds it to the template's form. Every decision of the log is named by a scenario's DECIDED BY or listed in the proposal under "Decisions with no scenario". Every pin a decision changes is named in the proposal's Impact.
+3. The reviewer runs only on a complete draft, with the draft in its checkout and nothing of the drafter's earlier rounds. It checks each decision against its scenarios and the draft against the pins. Each finding quotes the draft.
+4. The gate returns gaps and findings to the drafter, up to three rounds. A question from the drafter parks the item and calls the owner. So do findings that stand after the last round: the drafter and the reviewer do not agree, and that is a question for a person. The owner answers in a session as in part one, and marking the item answered starts the drafter again, from the draft it had.
+5. With no gap, no finding and no question, the gate commits the draft to `item-<number>` and labels the item `draft-reviewed`.
+
+## Every agent gets its result back once
+
+When `lib/check.py` refuses what an agent returned, `lib/agent.sh` hands the result back to the same agent once, with the reasons, in `refused.json`. A misplaced quote is put right there and does not cost the stage a round. The record of what ran adds up both tries.
+
 ## What differs from the slides
 
 - The classifier reads the code. On the slide it posted a fact about the code with no read of it.
@@ -76,10 +97,11 @@ The workflow is `.github/workflows/line-understand.yml`. Admission starts it wit
 - The path where an item brings a failing test (`intake-check` with a proof). The report reader is tested; the Maven run is not.
 - A returned item has no trigger of its own to come back: the requester edits it, and Intake is run again by hand.
 - At Understand: a round that hands the agent its refused result.
-- At Shape: everything on GitHub, and the session itself.
+- At Shape, part two: everything. The checks ran here on a draft written by hand; no agent has drafted or reviewed.
+- An agent's second try, on GitHub. A test runs it here with a stand-in for the agent's command.
 
 ## Tests
 
     python3 -B -m unittest discover -s .github/line/tests -v
 
-No network, no key, no model: every agent output in the tests is written by hand. The Understand pipeline (write, format, run, PIT, read) was also run once by hand on a checkout of `line`, with stand-in pins.
+No network, no key, no model: every agent output in the tests is written by hand. The Understand pipeline (write, format, run, PIT, read) was also run once by hand on a checkout of `line`, with stand-in pins. One test runs `lib/agent.sh` with a stand-in for the `claude` command.

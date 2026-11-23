@@ -12,7 +12,9 @@
 # the seconds) and then, from lib/check.py, <box>.json (the result) or <box>.why.
 #
 # AGENT_MODEL (Claude: claude-sonnet-5-5; Codex: gpt-6.1-sol), AGENT_MAX_TURNS (40),
-# AGENT_BUDGET_USD (1), AGENT_TIME_CAP in seconds (600).
+# AGENT_BUDGET_USD (1), AGENT_TIME_CAP in seconds (600), each for one try.
+# AGENT_TRIES (2): when lib/check.py refuses what the agent returned, the agent gets
+# its result back once with the reasons, in <inputs dir>/refused.json.
 #
 # The invocation is the one the Week 4 harness uses for its headless reviewers
 # (review/review-headless.sh, verified with Claude Code 2.1.281 and Codex 0.163.0).
@@ -36,58 +38,81 @@ case "$name" in *[!a-z/-]*) echo "agent: <stage>/<box> is lower-case letters and
 box="${name##*/}"
 skill="$line/$name.md"; schema="$line/$name.schema.json"
 [ -f "$skill" ] && [ -f "$schema" ] || { echo "agent: no skill or no schema for $name" >&2; exit 2; }
-rm -f "$out/result.json" "$out/$box.json" "$out/$box.why" "$out/$box.ran.json"
+rm -f "$out/result.json" "$out/$box.json" "$out/$box.why" "$out/$box.rejected.json" "$out/$box.ran.json" "$inputs/refused.json"
 
 git -C "$clone" ls-files | sort > "$inputs/files.txt"
-given="$(cd "$inputs" && find . -type f | sed 's|^\./||' | sort | paste -sd, - | sed 's/,/, /g')"
-cat > "$out/prompt.txt" <<P
+cd "$clone" || exit 1
+tries="${AGENT_TRIES:-2}"
+try=1
+while :; do
+  given="$(cd "$inputs" && find . -type f | sed 's|^\./||' | sort | paste -sd, - | sed 's/,/, /g')"
+  cat > "$out/prompt.txt" <<P
 Do your work on the item in $inputs/item.json. The inputs folder, $inputs, holds: $given. This folder is the checkout of the source repository; every file in it is listed in $inputs/files.txt. Read the files you need by path. Return the result as the structured output.
 P
-
-cd "$clone" || exit 1
-start="$(date +%s)"
-case "$vendor" in
-  claude)
-    tool="Claude Code"; model="${AGENT_MODEL:-claude-sonnet-5-5}"
-    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-      echo "agent: ANTHROPIC_API_KEY is not set; --bare reads no other sign-in" > "$out/stderr.txt"
-    else
-      timeout "${AGENT_TIME_CAP:-600}" claude -p "$(cat "$out/prompt.txt")" \
-        --bare \
-        --model "${AGENT_MODEL:-claude-sonnet-5-5}" \
-        --append-system-prompt-file "$skill" \
-        --add-dir "$inputs" \
-        --permission-mode dontAsk \
-        --disallowedTools "Bash" "Edit" "Write" "MultiEdit" "NotebookEdit" "WebFetch" "WebSearch" \
-        --output-format json \
-        --json-schema "$(cat "$schema")" \
-        --max-turns "${AGENT_MAX_TURNS:-40}" \
-        --max-budget-usd "${AGENT_BUDGET_USD:-1}" \
-        < /dev/null > "$out/result.json" 2> "$out/stderr.txt"
-      echo "agent: claude exit $?" >&2
-    fi
-    ;;
-  codex)
-    tool="Codex"; model="${AGENT_MODEL:-gpt-6.1-sol}"
-    if [ -z "${CODEX_API_KEY:-}" ]; then
-      echo "agent: CODEX_API_KEY is not set" > "$out/stderr.txt"
-    else
-      # After "--" the text is the prompt, whatever it begins with.
-      timeout "${AGENT_TIME_CAP:-600}" codex exec \
-        --model "${AGENT_MODEL:-gpt-6.1-sol}" \
-        --sandbox read-only \
-        -c shell_environment_policy.ignore_default_excludes=false \
-        --skip-git-repo-check \
-        --output-schema "$schema" \
-        -o "$out/result.json" \
-        -- "$(cat "$skill"; echo; cat "$out/prompt.txt")" \
-        < /dev/null > "$out/stdout.txt" 2> "$out/stderr.txt"
-      echo "agent: codex exit $?" >&2
-    fi
-    ;;
-  *) echo "agent: the vendor is claude or codex" >&2; exit 2 ;;
-esac
-tail -c 1500 "$out/stderr.txt" >&2 2> /dev/null || true
-python3 -B "$here/ran.py" "$tool" "$model" "$(( $(date +%s) - start ))" "$out/result.json" "$out/$box.ran.json"
-# The agent's exit code decides nothing: only an output that passes the check is a result.
-python3 -B "$here/check.py" "$box" "$schema" "$out/result.json" "$clone" "$inputs" "$out"
+  if [ -f "$inputs/refused.json" ]; then
+    echo "A script refused the result you returned a moment ago. $inputs/refused.json holds that result and the reasons. Return the whole result again with exactly those things put right, and keep the rest as it was." >> "$out/prompt.txt"
+  fi
+  rm -f "$out/result.json"
+  start="$(date +%s)"
+  case "$vendor" in
+    claude)
+      tool="Claude Code"; model="${AGENT_MODEL:-claude-sonnet-5-5}"
+      if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        echo "agent: ANTHROPIC_API_KEY is not set; --bare reads no other sign-in" > "$out/stderr.txt"
+      else
+        timeout "${AGENT_TIME_CAP:-600}" claude -p "$(cat "$out/prompt.txt")" \
+          --bare \
+          --model "$model" \
+          --append-system-prompt-file "$skill" \
+          --add-dir "$inputs" \
+          --permission-mode dontAsk \
+          --disallowedTools "Bash" "Edit" "Write" "MultiEdit" "NotebookEdit" "WebFetch" "WebSearch" \
+          --output-format json \
+          --json-schema "$(cat "$schema")" \
+          --max-turns "${AGENT_MAX_TURNS:-40}" \
+          --max-budget-usd "${AGENT_BUDGET_USD:-1}" \
+          < /dev/null > "$out/result.json" 2> "$out/stderr.txt"
+        echo "agent: claude exit $?" >&2
+      fi
+      ;;
+    codex)
+      tool="Codex"; model="${AGENT_MODEL:-gpt-6.1-sol}"
+      if [ -z "${CODEX_API_KEY:-}" ]; then
+        echo "agent: CODEX_API_KEY is not set" > "$out/stderr.txt"
+      else
+        # After "--" the text is the prompt, whatever it begins with.
+        timeout "${AGENT_TIME_CAP:-600}" codex exec \
+          --model "$model" \
+          --sandbox read-only \
+          -c shell_environment_policy.ignore_default_excludes=false \
+          --skip-git-repo-check \
+          --output-schema "$schema" \
+          -o "$out/result.json" \
+          -- "$(cat "$skill"; echo; cat "$out/prompt.txt")" \
+          < /dev/null > "$out/stdout.txt" 2> "$out/stderr.txt"
+        echo "agent: codex exit $?" >&2
+      fi
+      ;;
+    *) echo "agent: the vendor is claude or codex" >&2; exit 2 ;;
+  esac
+  tail -c 1500 "$out/stderr.txt" >&2 2> /dev/null || true
+  AGENT_TRY="$try" python3 -B "$here/ran.py" "$tool" "$model" "$(( $(date +%s) - start ))" "$out/result.json" "$out/$box.ran.json"
+  # The agent's exit code decides nothing: only an output that passes the check is a result.
+  if python3 -B "$here/check.py" "$box" "$schema" "$out/result.json" "$clone" "$inputs" "$out"; then
+    rm -f "$inputs/refused.json"
+    exit 0
+  fi
+  # A result the check refused goes back to the same agent once, with the reasons: a
+  # misplaced quote is put right here, and does not cost the stage a round.
+  if [ "$try" -ge "$tries" ] || [ ! -f "$out/$box.rejected.json" ]; then
+    rm -f "$inputs/refused.json"
+    exit 1
+  fi
+  python3 -B - "$out/$box.why" "$out/$box.rejected.json" "$inputs/refused.json" <<'PY'
+import json, sys
+why, rejected, out = sys.argv[1:]
+json.dump({"why_it_was_refused": open(why, encoding="utf-8").read().strip(), "your_result": json.load(open(rejected, encoding="utf-8"))},
+          open(out, "w", encoding="utf-8"), indent=2)
+PY
+  try=$((try + 1))
+done

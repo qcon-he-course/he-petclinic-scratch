@@ -2,7 +2,7 @@
 
 The delivery line from Week 5's blueprint, tried on this repository. An item is an issue. The orchestrator is GitHub Actions. The source the line works on is the branch `line`, cut from the commit before PC-303 was merged, so that PC-303 can go down the line from its one sentence.
 
-Built so far: **Intake** and **Understand**. The other six stages are not built.
+Built so far: **Intake**, **Understand** and **Shape, part one**. Shape's parts two and three and the other five stages are not built.
 
 ## Intake
 
@@ -44,6 +44,20 @@ The workflow is `.github/workflows/line-understand.yml`. Admission starts it wit
 4. The gate advances the item when every pin passes and none is one that cannot fail: it pushes the written pins to `item-<number>`, cut from `line`, and moves the item to `stage:shape`. It returns the item to the agent, with the reasons, when a pin does not build, does not pass or cannot fail: up to three rounds. It marks the item `stuck` when the rounds are used up or the mutation run left no report.
 5. Behavior the agent finds suspect is filed as a new item in the form's shape, labelled `suspect`.
 
+## Shape, part one
+
+| Box on the slide | Here | Model | May write |
+|---|---|---|---|
+| Product owner and assistant | Claude Code on the owner's computer, in a working folder on the item's branch | the owner's own | the item's branch |
+| Refine-requirement skill | `shape/refine-item/SKILL.md`, copied into that folder | | |
+| Commit check, in the session | `lib/shape_check.py commit`, as a pre-commit hook | none | nothing |
+| Commit check, in the orchestrator | job `commit-check` in `line-shape.yml`: `lib/shape_check.py branch` | none | the issue |
+
+1. The owner runs `.github/line/shape/start-session.sh <item>` from a clone on the default branch. It makes a working folder on `item-<number>` beside the clone, writes `.line/item.md` (the idea, the pins, the suspects, Intake's notes: `lib/brief.py`), copies the skill in and installs the hook.
+2. In Claude Code the owner says: "Refine item <number> with me. Use the refine-item skill." The skill asks in rounds and writes each decision to `openspec/changes/item-<number>/decisions.md`, terms to `GLOSSARY.md`, and a hard-to-reverse trade-off to `docs/adr/`.
+3. The check allows a commit to change only those files, and holds the log to its form. The hook runs it before each commit, and `git commit --no-verify` skips it.
+4. The owner adds the label `answered`. The job checks that they are the item's owner, then runs the check on every commit of the branch since Understand's pins, and requires that no question is open. A pass lists the decisions on the item. A failure takes the label off again.
+
 ## What differs from the slides
 
 - The classifier reads the code. On the slide it posted a fact about the code with no read of it.
@@ -54,12 +68,15 @@ The workflow is `.github/workflows/line-understand.yml`. Admission starts it wit
 - The pin-requirements agent does not write to the branch. It returns the files, a job with no key runs them, and the gate's job pushes them only when they hold. On the slide the agent writes first and the sensor runs after.
 - A suspect pin is filed as an item, and Intake does not start for it by itself: the line's own account is not a named requester.
 - "Can fail" means some mutant of the named classes fails the pin. It does not show that the pin's own assertion is the one that failed.
+- At Shape the push does not start the check in CI. GitHub runs a push's workflow from the pushed branch, so an item's branch would judge itself. The label `answered` starts it from the default branch.
+- The decisions are in the log on the branch, and are posted on the item when the check passes. On the slide each is saved on the item as it is made.
 
 ## Not exercised yet
 
 - The path where an item brings a failing test (`intake-check` with a proof). The report reader is tested; the Maven run is not.
 - A returned item has no trigger of its own to come back: the requester edits it, and Intake is run again by hand.
-- At Understand: a second round, which fetches the first round's results from its run, and a suspect filed as an item.
+- At Understand: a round that hands the agent its refused result.
+- At Shape: everything on GitHub, and the session itself.
 
 ## Tests
 

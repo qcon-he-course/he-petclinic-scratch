@@ -1,0 +1,66 @@
+# Shape, the third stage of the line. Built so far: part one, where the item's owner
+# decides in an attended session, outside the orchestrator.
+#
+# The session writes the owner's decisions to the item's branch: a decisions log, the
+# glossary and, rarely, a decision record. A script, lib/shape_check.py, says whether
+# that change is safe to commit. The session runs it before each commit, as a hook a
+# person can skip. This workflow runs it again on the pushed branch.
+#
+#   commit-check   the owner added the label "answered": checks that they are the
+#                  owner, runs the check on every commit since Understand's pins, and
+#                  posts the result. It reads the branch and runs none of its code.
+#                  No model, no key.
+#
+# A push cannot start this check: GitHub would run the workflow file of the pushed
+# branch, and an item's branch would then judge itself. The label starts the workflow
+# from the default branch.
+name: "line: shape"
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+concurrency:
+  group: line-shape-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  ITEM: ${{ github.event.issue.number }}
+  LINE_BRANCH: line
+
+jobs:
+  commit-check:
+    if: github.event.label.name == 'answered'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - name: Check out the item's branch, with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: item-${{ github.event.issue.number }}
+          path: repo
+          fetch-depth: 0
+          persist-credentials: false
+        continue-on-error: true
+      - name: Run the commit check on the branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENDER: ${{ github.event.sender.login }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p run
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM" > run/issue.json
+          python3 -B ctl/.github/line/lib/shape_answered.py run/issue.json "$SENDER" repo "origin/$LINE_BRANCH" ctl/.github/line run/effects.json
+          python3 -B ctl/.github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json ctl/.github/line

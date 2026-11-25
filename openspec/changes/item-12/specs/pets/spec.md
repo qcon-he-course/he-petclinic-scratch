@@ -8,17 +8,17 @@ The system SHALL show, for each pet on the owner's page, its Age in a row right 
 
 #### Scenario: The Age row follows the birth date
 
-- **WHEN** the owner's page is shown on 2026-11-23 for an owner with a cat named "Leo" born 2023-11-23
-- **THEN** the pet shows its rows in this order: Name "Leo", Birth Date "2023-11-23", Age "3 years", Type "cat"
+- **WHEN** the owner's page is shown for an owner with a cat named "Leo" born 3 years before today
+- **THEN** the pet shows its rows in this order: Name "Leo", Birth Date (Leo's birth date as year-month-day), Age "3 years", Type "cat"
 - **AND** the label of the row is "Age"
 - **CHECKED AT** form
 - **DECIDED BY** D1, D7
 
 #### Scenario: Age is counted to the server's today
 
-- **WHEN** the owner's page is shown on a day when the server's date is 2026-11-23, for a pet born 2025-11-23
-- **THEN** the Age is "1 year"
-- **AND** the add form accepts 2026-11-23 as a birth date and rejects 2026-11-24 with "invalid date"
+- **WHEN** the add form is submitted with today's date as the birth date of a new pet
+- **THEN** the form accepts it
+- **AND** the owner's page then shows that pet's Age as "0 days"
 - **CHECKED AT** form
 - **DECIDED BY** D2
 
@@ -28,93 +28,93 @@ The system SHALL show the Age in completed years when the pet is 1 year old or m
 
 #### Scenario: Years from one year up
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2023-11-23
-- **THEN** the Age is "3 years"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2023-11-23
+- **THEN** the age is "3 years"
+- **CHECKED AT** unit
 - **DECIDED BY** D3
 
 #### Scenario: Months under one year
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2026-06-23
-- **THEN** the Age is "5 months"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2026-06-23
+- **THEN** the age is "5 months"
+- **CHECKED AT** unit
 - **DECIDED BY** D3
 
 #### Scenario: Days under one month
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2026-11-11
-- **THEN** the Age is "12 days"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2026-11-11
+- **THEN** the age is "12 days"
+- **CHECKED AT** unit
 - **DECIDED BY** D3
 
 #### Scenario: Months are not combined with years
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2024-08-23, which is 2 years and 3 months before
-- **THEN** the Age is "2 years" and not "2 years 3 months"
-- **CHECKED AT** form
-- **DECIDED BY** D3, D9
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2024-08-23, which is 2 years and 3 months before
+- **THEN** the age is "2 years" and not "2 years 3 months"
+- **CHECKED AT** unit
+- **DECIDED BY** D3
 
 #### Scenario: A short month counts the days of the calendar
 
-- **WHEN** the owner's page is shown on 2025-02-28 for a pet born 2025-01-31
-- **THEN** the Age is "28 days"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2025-02-28 for a birth date of 2025-01-31
+- **THEN** the age is "28 days"
+- **CHECKED AT** unit
 - **DECIDED BY** D8
 
 #### Scenario: Born on a leap day, the day before the anniversary
 
-- **WHEN** the owner's page is shown on 2025-02-28 for a pet born 2024-02-29
-- **THEN** the Age is "11 months"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2025-02-28 for a birth date of 2024-02-29
+- **THEN** the age is "11 months"
+- **CHECKED AT** unit
 - **DECIDED BY** D8
 
 #### Scenario: Born on a leap day, the first of March
 
-- **WHEN** the owner's page is shown on 2025-03-01 for a pet born 2024-02-29
-- **THEN** the Age is "1 year"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2025-03-01 for a birth date of 2024-02-29
+- **THEN** the age is "1 year"
+- **CHECKED AT** unit
 - **DECIDED BY** D8, D9
 
 #### Scenario: The day before the first birthday
 
-- **WHEN** the owner's page is shown on 2026-11-22 for a pet born 2025-11-23
-- **THEN** the Age is "11 months"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-22 for a birth date of 2025-11-23
+- **THEN** the age is "11 months"
+- **CHECKED AT** unit
 - **DECIDED BY** D8
 
 #### Scenario: The first birthday
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2025-11-23
-- **THEN** the Age is "1 year"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2025-11-23
+- **THEN** the age is "1 year"
+- **CHECKED AT** unit
 - **DECIDED BY** D8, D9
 
 #### Scenario: Born today
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2026-11-23
-- **THEN** the Age is "0 days"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2026-11-23
+- **THEN** the age is "0 days"
+- **CHECKED AT** unit
 - **DECIDED BY** D8, D9
 
 #### Scenario: One month
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2026-10-23
-- **THEN** the Age is "1 month"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2026-10-23
+- **THEN** the age is "1 month"
+- **CHECKED AT** unit
 - **DECIDED BY** D9
 
 #### Scenario: One day
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2026-11-22
-- **THEN** the Age is "1 day"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2026-11-22
+- **THEN** the age is "1 day"
+- **CHECKED AT** unit
 - **DECIDED BY** D9
 
 #### Scenario: Two years is plural
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet born 2024-11-23
-- **THEN** the Age is "2 years"
-- **CHECKED AT** form
+- **WHEN** the age is counted on 2026-11-23 for a birth date of 2024-11-23
+- **THEN** the age is "2 years"
+- **CHECKED AT** unit
 - **DECIDED BY** D9
 
 ### Requirement: A pet with no age shows an empty Age
@@ -132,8 +132,8 @@ The system SHALL show the Age label with an empty value for a pet that has no st
 
 #### Scenario: A birth date later than today
 
-- **WHEN** the owner's page is shown on 2026-11-23 for a pet whose stored birth date is 2026-11-24
-- **THEN** the Birth Date is "2026-11-24" and the Age value is empty, with the label "Age" shown
+- **WHEN** the owner's page is shown for a pet whose stored birth date is tomorrow
+- **THEN** the Birth Date shows tomorrow's date as year-month-day and the Age value is empty, with the label "Age" shown
 - **AND** the Age is not "0 days" and is not negative
 - **CHECKED AT** form
 - **DECIDED BY** D5, D12

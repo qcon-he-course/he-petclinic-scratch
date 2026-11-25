@@ -25,6 +25,9 @@ import brief  # noqa: E402
 import draft  # noqa: E402
 import draft_gate  # noqa: E402
 import proof  # noqa: E402
+import ready  # noqa: E402
+import ready_check  # noqa: E402
+import shape_gate  # noqa: E402
 import spec_check  # noqa: E402
 import shape_answered  # noqa: E402
 import shape_check  # noqa: E402
@@ -641,7 +644,7 @@ Item: #7 Show the age
 GLOSSARY = "# Pet clinic\n\nOwners and pets.\n\n## Language\n\n**Age**:\nHow old a pet is today.\n"
 
 
-class Shape(unittest.TestCase):
+class ShapeFixture:
     """A small repository: the branch line, then item-7 with Understand's pins on it."""
 
     def setUp(self):
@@ -677,6 +680,9 @@ class Shape(unittest.TestCase):
             self.write("GLOSSARY.md", glossary)
         self.git("add", "-A")
 
+
+
+class Shape(ShapeFixture, unittest.TestCase):
     def test_a_commit_of_the_log_and_the_glossary_is_safe(self):
         self.session()
         self.assertEqual(shape_check.check_commit(self.repo, 7), [])
@@ -771,6 +777,13 @@ class Shape(unittest.TestCase):
         self.commit("session")
         self.assertIn("not the item's owner", self.answered(sender="mallory")["comments"][0])
         self.assertIn("not at Shape", self.answered(labels=("line", "stage:understand", "answered"))["comments"][0])
+
+    def test_in_ci_an_item_with_a_reviewed_draft_is_not_marked_answered_again(self):
+        self.session()
+        self.commit("session")
+        effects = self.answered(labels=("line", "stage:shape", "draft-reviewed", "answered"))
+        self.assertIn("has a reviewed draft", effects["comments"][0])
+        self.assertEqual(effects["remove"], ["answered"])
 
 
 class Brief(unittest.TestCase):
@@ -1113,6 +1126,155 @@ class AgentRunner(unittest.TestCase):
         self.assertEqual(self.run_agent().returncode, 0)
         self.assertEqual(text(f"{self.d.name}/stub/calls").strip(), "1")
         self.assertEqual(load(f"{self.d.name}/out/intake-agent.ran.json")["tries"], 1)
+
+
+class Ready(ShapeFixture, unittest.TestCase):
+    """item-7 after part two: the owner's decisions, then the line's reviewed draft."""
+
+    def setUp(self):
+        super().setUp()
+        self.write(ROOT7 + "decisions.md", LOG2)
+        self.write("GLOSSARY.md", GLOSSARY)
+        self.commit("Shape: the owner's decisions for item 7")
+        self.write(ROOT7 + "proposal.md", PROPOSAL.format(impact="It changes the pin `OwnerPinTests#theOrder`.",
+                                                          extra="\n## Decisions with no scenario\n\n- **D2** A word in the glossary.\n"))
+        self.write(ROOT7 + "specs/pets/spec.md", SPEC)
+        self.commit("Shape: draft spec for item 7")
+
+    def stage_file(self, name):
+        os.makedirs(os.path.join(self.repo, ".line"), exist_ok=True)
+        with open(os.path.join(self.repo, ".line", "stage"), "w") as f:
+            f.write(name + "\n")
+
+    def session_check(self):
+        return subprocess.run([sys.executable, "-B", os.path.join(LINE, "lib", "session_check.py"), "commit", self.repo, "7"],
+                              capture_output=True, text=True)
+
+    def test_the_reviewed_draft_passes_as_it_is_with_nothing_changed(self):
+        got = ready_check.check_branch(self.repo, 7, "line")
+        self.assertTrue(got["passed"], got["problems"])
+        self.assertEqual((got["scenarios"], got["decisions"], got["changed_since_the_reviewed_draft"]), (1, 2, []))
+
+    def test_the_owner_may_change_the_spec_and_the_change_is_named(self):
+        self.write(ROOT7 + "specs/pets/spec.md", SPEC.replace("**CHECKED AT** unit", "**CHECKED AT** form"))
+        self.commit("Shape: the owner's refinement of the spec for item 7")
+        got = ready_check.check_branch(self.repo, 7, "line")
+        self.assertTrue(got["passed"], got["problems"])
+        self.assertEqual(got["changed_since_the_reviewed_draft"], [ROOT7 + "specs/pets/spec.md"])
+
+    def test_a_refinement_that_leaves_the_draft_incomplete_or_touches_code_fails(self):
+        self.write(ROOT7 + "specs/pets/spec.md", SPEC.replace("- **DECIDED BY** D1\n", ""))
+        self.write("src/main/java/Owner.java", "class Owner { int age; }\n")
+        self.commit("too much")
+        problems = " | ".join(ready_check.check_branch(self.repo, 7, "line")["problems"])
+        self.assertIn("needs one DECIDED BY", problems)
+        self.assertIn("src/main/java/Owner.java, which is not a file this stage changes", problems)
+
+    def test_a_new_decision_must_reach_the_draft_and_no_question_may_be_open(self):
+        self.write(ROOT7 + "decisions.md", LOG2.replace("\n## Facts", "- **D3** Today can be set in a test. Asked as Q3, answered 2026-11-25.\n\n## Facts")
+                   + "\n- **O1** Which clock. Not reached.\n")
+        self.commit("a decision the spec does not show")
+        problems = " | ".join(ready_check.check_branch(self.repo, 7, "line")["problems"])
+        self.assertIn("D3 is in no scenario's DECIDED BY", problems)
+        self.assertIn("O1 is still open", problems)
+
+    def test_the_sessions_hook_runs_the_check_of_the_stage_the_item_is_at(self):
+        self.write(ROOT7 + "specs/pets/spec.md", SPEC.replace("3 years", "three years"))
+        self.git("add", "-A")
+        self.stage_file("shape-1")
+        refused = self.session_check()
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("spec.md is not a file this stage changes", refused.stderr)
+        self.stage_file("shape-3")
+        self.assertEqual(self.session_check().returncode, 0)
+        self.write("src/main/java/Owner.java", "class Owner { int age; }\n")
+        self.git("add", "-A")
+        self.assertIn("src/main/java/Owner.java is not a file this stage changes", self.session_check().stderr)
+        os.remove(os.path.join(self.repo, ".line", "stage"))
+        self.assertEqual(self.session_check().returncode, 2)
+
+    def marked_ready(self, sender="pat", labels=("line", "stage:shape", "answered", "draft-reviewed", "ready")):
+        with tempfile.TemporaryDirectory() as d:
+            dump(f"{d}/issue.json", {**issue(who="premanandc"), "number": 7, "labels": [{"name": n} for n in labels],
+                                     "assignees": [{"login": "pat"}]})
+            dump(f"{d}/comments.json", [{"user": {"login": BOT}, "body": "x\n" + data_block(pin_result(), "understand", "pin-agent", 1)}])
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                ready.main([f"{d}/issue.json", f"{d}/comments.json", sender, self.repo, "line", LINE, f"{d}/out"])
+            files = sorted(os.listdir(f"{d}/out"))
+            got = load(f"{d}/out/item.json") if "item.json" in files else None
+            diff = text(f"{d}/out/changes.diff") if "changes.diff" in files else None
+            return out.getvalue().strip(), load(f"{d}/out/effects.json"), files, got, diff
+
+    def test_in_ci_the_owners_ready_passes_and_gathers_what_the_reviewer_reads(self):
+        self.write(ROOT7 + "specs/pets/spec.md", SPEC.replace("3 years", "three years").replace("three years before", "3 years before"))
+        self.commit("Shape: the owner's refinement of the spec for item 7")
+        said, effects, files, got, diff = self.marked_ready()
+        self.assertEqual(said, "passed=yes")
+        self.assertEqual(effects["remove"], [])
+        self.assertIn("Since the reviewed draft the owner changed", effects["comments"][0])
+        self.assertEqual(files, ["changes.diff", "effects.json", "item.json", "pins.json", "ready-check.json"])
+        self.assertEqual((got["owner"], got["decisions"]), ("pat", 2))
+        self.assertIn("three years", diff)
+
+    def test_in_ci_ready_is_refused_for_someone_else_or_before_the_draft_is_reviewed_or_when_the_check_fails(self):
+        self.assertIn("not the item's owner", self.marked_ready(sender="mallory")[1]["comments"][0])
+        self.assertIn("reviewed draft", self.marked_ready(labels=("line", "stage:shape", "answered", "ready"))[1]["comments"][0])
+        self.write("src/main/java/Owner.java", "class Owner { int age; }\n")
+        self.commit("code")
+        said, effects, files, _, _ = self.marked_ready()
+        self.assertEqual((said, effects["remove"]), ("passed=no", ["ready"]))
+        self.assertIn("**Failed.**", effects["comments"][0])
+        self.assertNotIn("item.json", files)
+
+
+class ShapeGate(unittest.TestCase):
+    def run_gate(self, reviewer=None):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(f"{d}/results")
+            dump(f"{d}/item.json", an_item(number=7, owner="pat"))
+            dump(f"{d}/results/ready-check.json", {"passed": True, "head": "abcdef0123", "scenarios": 4, "decisions": 2})
+            if reviewer is not None:
+                dump(f"{d}/results/spec-reviewer.json", reviewer)
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(shape_gate.main([f"{d}/item.json", f"{d}/results", LINE, f"{d}/effects.json"]), 0)
+            effects = load(f"{d}/effects.json")
+            self.assertTrue(set(effects["add"] + effects["remove"]) <= set(POLICY["labels"]))
+            return out.getvalue().strip(), effects
+
+    def test_no_finding_passes_the_item_to_design_ready_and_not_approved(self):
+        outcome, effects = self.run_gate({"findings": [], "summary": "Fine."})
+        self.assertEqual(outcome, "outcome=passed")
+        self.assertEqual(effects["add"], ["stage:design"])
+        self.assertIn("stage:shape", effects["remove"])
+        self.assertIn("not yet approved", effects["comments"][-1])
+        self.assertEqual(latest(read_results([{"user": {"login": BOT}, "body": c} for c in effects["comments"]]), "shape", "shape-gate")["head"],
+                         "abcdef0123")
+
+    def test_a_finding_goes_back_to_the_owner_and_nobody_else(self):
+        outcome, effects = self.run_gate({"findings": [a_finding()], "summary": "One."})
+        self.assertEqual(outcome, "outcome=returned")
+        self.assertEqual(effects["add"], [])
+        self.assertIn("ready", effects["remove"])
+        self.assertIn("@pat", effects["comments"][-1])
+        self.assertIn("S1 (decision not shown, against D1)", effects["comments"][-1])
+
+    def test_no_result_from_the_reviewer_is_stuck(self):
+        outcome, effects = self.run_gate()
+        self.assertEqual(outcome, "outcome=stuck")
+        self.assertEqual(effects["add"], ["stuck"])
+
+
+class BriefStage(unittest.TestCase):
+    def test_the_brief_says_which_session_the_item_waits_for(self):
+        decided = {**issue(), "labels": [{"name": "stage:shape"}], "assignees": [{"login": "pat"}]}
+        drafted = {**decided, "labels": [{"name": "stage:shape"}, {"name": "draft-reviewed"}]}
+        self.assertEqual((brief.session_stage(decided), brief.session_stage(drafted)), ("shape-1", "shape-3"))
+        returned = [{"user": {"login": BOT}, "body": "x\n" + data_block({"outcome": "returned", "reasons": ["S1 (cannot be checked, against D2): no clock."]},
+                                                                           "shape", "shape-gate", 9)}]
+        text_ = brief.write(drafted, returned)
+        self.assertIn("## The draft", text_)
+        self.assertIn("S1 (cannot be checked, against D2): no clock.", text_)
+        self.assertNotIn("## The draft", brief.write(decided, []))
 
 
 if __name__ == "__main__":

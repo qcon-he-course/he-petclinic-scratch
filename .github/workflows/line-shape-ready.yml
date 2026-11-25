@@ -1,0 +1,175 @@
+# Shape, part three: the owner has read the reviewed draft, refined it in an attended
+# session, and marked it ready.
+#
+#   ready-check  the owner added the label "ready": checks that they are the owner,
+#                runs lib/ready_check.py on every commit of the item's branch, and
+#                posts the result. It reads the branch and runs none of its code.
+#                No model, no key.
+#   reviewer     the independent reviewer, from a second vendor, in a fresh session:
+#                reads the draft as the owner left it against the decisions and the
+#                pins, what the owner changed first. One API key, a read-only sandbox.
+#   shape-gate   posts the reviewer's result and applies the policy: returns the draft
+#                to the owner, or passes the item to Design. No model, no key.
+#
+# The label starts this workflow from the default branch, so the item's branch cannot
+# edit what judges it.
+name: "line: shape, ready"
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+concurrency:
+  group: line-shape-ready-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  ITEM: ${{ github.event.issue.number }}
+  LINE_BRANCH: line
+
+jobs:
+  ready-check:
+    if: github.event.label.name == 'ready'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      passed: ${{ steps.check.outputs.passed }}
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - name: Check out the item's branch, with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: item-${{ github.event.issue.number }}
+          path: repo
+          fetch-depth: 0
+          persist-credentials: false
+        continue-on-error: true
+      - name: Run the ready check on the branch
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENDER: ${{ github.event.sender.login }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p run
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM" > run/issue.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$ITEM/comments?per_page=100" \
+            | python3 -c 'import json, sys; json.dump([c for page in json.load(sys.stdin) for c in page], sys.stdout)' > run/comments.json
+          python3 -B ctl/.github/line/lib/ready.py run/issue.json run/comments.json "$SENDER" repo "origin/$LINE_BRANCH" ctl/.github/line run/out
+          python3 -B ctl/.github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/out/effects.json ctl/.github/line
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.check.outputs.passed == 'yes'
+        with:
+          name: item
+          path: |
+            run/out/item.json
+            run/out/pins.json
+            run/out/changes.diff
+          if-no-files-found: ignore
+          overwrite: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.check.outputs.passed == 'yes'
+        with:
+          name: result-ready-check
+          path: run/out/ready-check.json
+          overwrite: true
+
+  reviewer:
+    needs: ready-check
+    if: needs.ready-check.outputs.passed == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the item's branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: item-${{ github.event.issue.number }}
+          path: repo
+          persist-credentials: false
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the agent's command-line tool
+        run: npm install --global @openai/codex@0.163.0
+      # Codex reads files through commands in a sandbox with no write access and no
+      # network. Ubuntu 24.04 stops that sandbox from starting; this setting lets it start.
+      - name: Let Codex's sandbox start
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Review the draft as the owner left it, with one key and no way to write
+        env:
+          CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_TIME_CAP: "900"
+        run: |
+          test "$(git -C repo rev-parse HEAD)" = "$(python3 -c 'import json; print(json.load(open("inputs/item.json"))["checked_head"])')" \
+            || { echo "the branch moved after the ready check" >&2; exit 1; }
+          ctl/.github/line/lib/agent.sh codex shape/spec-reviewer repo inputs out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: result-spec-reviewer
+          path: |
+            out/spec-reviewer.json
+            out/spec-reviewer.why
+            out/spec-reviewer.ran.json
+          if-no-files-found: ignore
+          overwrite: true
+
+  shape-gate:
+    needs: [ready-check, reviewer]
+    if: always() && needs.ready-check.outputs.passed == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the line's scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/line
+          path: ctl
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: item
+          path: inputs
+      - name: Fetch what the boxes left
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+        continue-on-error: true
+      - name: Apply the policy, and post the result on the item
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p results run
+          ls -l results
+          python3 -B ctl/.github/line/lib/shape_gate.py inputs/item.json results ctl/.github/line run/effects.json
+          python3 -B ctl/.github/line/lib/apply.py "$GITHUB_REPOSITORY" "$ITEM" run/effects.json ctl/.github/line

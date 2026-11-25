@@ -96,7 +96,7 @@ The session is done when the frontier is empty, or when the owner ends it.
 3. Stage each file you changed with `git add`, and nothing else. Then run the commit check, with the number of the item:
 
    ```
-   python3 -B "$(cat .line/control)/lib/shape_check.py" commit . <number>
+   python3 -B "$(cat .line/control)/lib/session_check.py" commit . <number>
    ```
 
    If it refuses, put right what it names and run it again.

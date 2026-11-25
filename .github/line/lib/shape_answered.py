@@ -32,6 +32,9 @@ def main(argv):
     refused = None
     if "line" not in labels or "stage:shape" not in labels:
         refused = "The item is not at Shape, so there is nothing to mark answered."
+    elif "draft-reviewed" in labels:
+        refused = ("The item has a reviewed draft. The owner refines the draft in a session and marks the spec `ready`; "
+                   "a change of a decision is made there, with the draft.")
     elif sender not in owners:
         refused = f"@{sender} is not the item's owner. The owner marks the item answered."
     elif not os.path.exists(os.path.join(clone, ".git")):

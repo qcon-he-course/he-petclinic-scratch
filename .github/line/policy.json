@@ -42,6 +42,10 @@
       "155e75",
       "The item is at Shape"
     ],
+    "stage:design": [
+      "155e75",
+      "The item is at Design"
+    ],
     "type:behavior-change": [
       "64748b",
       "Type: behavior change"
@@ -89,6 +93,10 @@
     "draft-reviewed": [
       "15803d",
       "The draft spec is complete and reviewed, and waits for the owner"
+    ],
+    "ready": [
+      "15803d",
+      "Add this label when the owner has read and refined the draft. It starts the ready check and the reviewer"
     ],
     "suspect": [
       "b45309",

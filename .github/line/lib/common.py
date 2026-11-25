@@ -10,7 +10,8 @@ BOXES = ["intake-agent", "intake-check", "classifier"]
 BOX_NAMES = {"intake-agent": "Intake agent", "intake-check": "Intake check", "classifier": "Classifier agent",
              "admission-gate": "Admission gate", "pin-agent": "Pin-requirements agent", "mutation-sensor": "Mutation sensor",
              "understand-gate": "Understand gate", "commit-check": "Commit check", "spec-drafter": "Spec-drafter agent",
-             "completeness-check": "Completeness check", "spec-reviewer": "Reviewer", "draft-gate": "Draft gate"}
+             "completeness-check": "Completeness check", "spec-reviewer": "Reviewer", "draft-gate": "Draft gate",
+             "ready-check": "Ready check", "shape-gate": "Shape gate"}
 MARK = "<!-- line:result stage={stage} box={box} run={run} -->"
 MARK_RE = re.compile(r"<!-- line:result stage=([a-z-]+) box=([a-z-]+) run=(\w+) -->\s*$")
 BOT = "github-actions[bot]"

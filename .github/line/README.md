@@ -2,7 +2,7 @@
 
 The delivery line from Week 5's blueprint, tried on this repository. An item is an issue. The orchestrator is GitHub Actions. The source the line works on is the branch `line`, cut from the commit before PC-303 was merged, so that PC-303 can go down the line from its one sentence.
 
-Built so far: **Intake**, **Understand** and **Shape, parts one and two**. Shape's part three and the other five stages are not built.
+Built so far: **Intake**, **Understand** and **Shape**, all three parts. The other five stages are not built.
 
 ## Intake
 
@@ -75,6 +75,23 @@ The workflow is `.github/workflows/line-shape-draft.yml`. A passing commit check
 4. The gate returns gaps and findings to the drafter, up to three rounds. A question from the drafter parks the item and calls the owner. So do findings that stand after the last round: the drafter and the reviewer do not agree, and that is a question for a person. The owner answers in a session as in part one, and marking the item answered starts the drafter again, from the draft it had.
 5. With no gap, no finding and no question, the gate commits the draft to `item-<number>` and labels the item `draft-reviewed`.
 
+## Shape, part three
+
+| Box on the slide | Here | Model | May write |
+|---|---|---|---|
+| Product owner and assistant | Claude Code on the owner's computer, in the working folder on the item's branch | the owner's own | the item's branch |
+| The skill | `shape/refine-draft/SKILL.md` | | |
+| Completeness check, in the session | `lib/session_check.py commit`, as the pre-commit hook: at this stage `lib/ready_check.py` | none | nothing |
+| Completeness check, in the orchestrator | job `ready-check` in `line-shape-ready.yml` | none | the issue |
+| Reviewer | job `reviewer`: Codex, a fresh session, the owner's changes first | OpenAI | nothing |
+| Shape gate | job `shape-gate`: `lib/shape_gate.py` | none | the issue |
+
+1. `start-session.sh <item>` reads the item's labels. With a reviewed draft it sets the session up for part three: the brief names the draft, and the hook runs this stage's check.
+2. In Claude Code the owner says: "Read the draft spec of item <number> with me. Use the refine-draft skill." The skill walks the owner through the draft, changes what they ask, and keeps the log in step: a change of behavior is a change of a decision, and goes into the log first.
+3. The check allows a commit to change the draft and what part one may change. The log must be well formed with no question open, and the draft must pass the completeness check.
+4. The owner marks the spec `ready`. The job runs the check on every commit of the branch. The reviewer then reads the draft as the owner left it, whether or not the owner changed it.
+5. The gate returns a finding to the owner, in a session: nobody else changes the owner's spec. With no finding the item moves to `stage:design`. Ready is not approved: approval waits for Design.
+
 ## Every agent gets its result back once
 
 When `lib/check.py` refuses what an agent returned, `lib/agent.sh` hands the result back to the same agent once, with the reasons, in `refused.json`. A misplaced quote is put right there and does not cost the stage a round. The record of what ran adds up both tries.
@@ -91,13 +108,14 @@ When `lib/check.py` refuses what an agent returned, `lib/agent.sh` hands the res
 - "Can fail" means some mutant of the named classes fails the pin. It does not show that the pin's own assertion is the one that failed.
 - At Shape the push does not start the check in CI. GitHub runs a push's workflow from the pushed branch, so an item's branch would judge itself. The label `answered` starts it from the default branch.
 - The decisions are in the log on the branch, and are posted on the item when the check passes. On the slide each is saved on the item as it is made.
+- At Shape, part three, the reviewer reads the whole draft every time, with the owner's changes first. On the slide it reviews what changed. The line has no record it can trust of which commit the reviewer last read.
 
 ## Not exercised yet
 
 - The path where an item brings a failing test (`intake-check` with a proof). The report reader is tested; the Maven run is not.
 - A returned item has no trigger of its own to come back: the requester edits it, and Intake is run again by hand.
 - At Understand: a round that hands the agent its refused result.
-- At Shape, part two: everything. The checks ran here on a draft written by hand; no agent has drafted or reviewed.
+- At Shape, part three: everything on GitHub, and the session. The check and the gate ran here against item 12's real branch.
 - An agent's second try, on GitHub. A test runs it here with a stand-in for the agent's command.
 
 ## Tests

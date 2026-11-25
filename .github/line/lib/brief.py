@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """brief: write what the line knows about an item, for the owner's attended session. No model.
 
-  brief.py <owner/repo> <item> <out file>
+  brief.py <owner/repo> <item> <out file> [<stage file>]
 
 Reads the issue and its comments from GitHub, through the gh CLI when it is there and
 signed in, and otherwise without a sign-in (enough for a public repository). Takes
 the results only from comments by the workflow's own account. Writes one Markdown
 file: the idea, its type and owner, the pins, what looked wrong, what Intake noted.
+With <stage file>, also writes which attended session the item is waiting for:
+shape-3 when its draft is reviewed (the owner refines the draft), otherwise shape-1
+(the owner decides).
 """
 import json
 import os
@@ -34,6 +37,10 @@ def one_line(text):
     return " ".join(str(text).split())
 
 
+def session_stage(issue):
+    return "shape-3" if "draft-reviewed" in [l["name"] for l in issue["labels"]] else "shape-1"
+
+
 def write(issue, comments):
     results = read_results(comments)
     got = fields(issue.get("body")) or {"idea": "(the item was not filed through the form)", "type": "?"}
@@ -53,6 +60,14 @@ def write(issue, comments):
         L += [f"- {one_line(q)}" for q in parked.get("questions", [])]
         L += [f"  - Why it is open: {one_line(q['why'])} Recommended: {one_line(q['recommended'])}" for q in asked]
         L += [""]
+    if "draft-reviewed" in labels:
+        number = issue["number"]
+        L += ["## The draft", "", f"A spec was drafted from the owner's decisions, checked for completeness and reviewed. It is on the branch, in "
+              f"`openspec/changes/item-{number}/proposal.md` and `openspec/changes/item-{number}/specs/`. The owner reads it now, refines it, and marks it ready.", ""]
+        returned = latest(results, "shape", "shape-gate")
+        if returned and returned.get("outcome") == "returned":
+            L += ["## Findings the reviewer has on the draft as the owner left it", ""]
+            L += [f"- {one_line(r)}" for r in returned.get("reasons", [])] + [""]
     decided = latest(results, "shape", "commit-check")
     if decided and decided.get("decisions"):
         L += ["## Decided so far", "", f"{len(decided['decisions'])} decisions are in `openspec/changes/item-{issue['number']}/decisions.md` on the branch.", ""]
@@ -83,16 +98,19 @@ def write(issue, comments):
 
 
 def main(argv):
-    if len(argv) != 3 or not argv[1].isdigit():
+    if len(argv) not in (3, 4) or not argv[1].isdigit():
         print(__doc__.split("\n\n")[1], file=sys.stderr)
         return 2
-    repo, number, out = argv
+    repo, number, out = argv[:3]
     issue = fetch(repo, f"issues/{number}")
     comments = fetch(repo, f"issues/{number}/comments?per_page=100")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write(write(issue, comments))
     print(f"brief: wrote {out}")
+    if len(argv) == 4:
+        with open(argv[3], "w", encoding="utf-8") as f:
+            f.write(session_stage(issue) + "\n")
     return 0
 
 

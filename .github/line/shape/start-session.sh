@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Set up the owner's attended session for Shape, part one, on this computer.
+# Set up the owner's attended session for Shape on this computer: part one, where the
+# owner decides, or part three, where the owner refines the reviewed draft. The item's
+# labels say which.
 #
 #   .github/line/shape/start-session.sh <item>
 #
@@ -9,7 +11,7 @@
 # that git does not track:
 #   .line/item.md      what the line knows about the item: the idea, the pins, the notes
 #   .line/stage        the stage, which tells the commit check what a commit may change
-#   .claude/skills/    the refine-item skill, for the assistant
+#   .claude/skills/    the refine-item and refine-draft skills, for the assistant
 # It also installs the commit check as this clone's pre-commit hook. The hook acts on
 # item branches only. A person can skip it (git commit --no-verify); the same check
 # runs again in CI, where nobody can.
@@ -34,11 +36,13 @@ git -C "$folder" config "branch.item-$item.remote" origin
 git -C "$folder" config "branch.item-$item.merge" "refs/heads/item-$item"
 
 mkdir -p "$folder/.line" "$folder/.claude/skills"
-rm -rf "$folder/.claude/skills/refine-item"
-cp -R "$here/refine-item" "$folder/.claude/skills/refine-item"
-echo "shape-1" > "$folder/.line/stage"
+for skill in refine-item refine-draft; do
+  rm -rf "$folder/.claude/skills/$skill"
+  cp -R "$here/$skill" "$folder/.claude/skills/$skill"
+done
 echo "$line" > "$folder/.line/control"
-python3 -B "$line/lib/brief.py" "$repo" "$item" "$folder/.line/item.md"
+python3 -B "$line/lib/brief.py" "$repo" "$item" "$folder/.line/item.md" "$folder/.line/stage"
+stage="$(cat "$folder/.line/stage")"
 
 exclude="$(git -C "$clone" rev-parse --git-common-dir)/info/exclude"
 case "$exclude" in /*) ;; *) exclude="$clone/$exclude" ;; esac
@@ -57,15 +61,28 @@ branch="\$(git symbolic-ref --short HEAD 2> /dev/null)"
 top="\$(git rev-parse --show-toplevel)"
 case "\$branch" in
   item-*)
-    [ "\$(cat "\$top/.line/stage" 2> /dev/null)" = "shape-1" ] || exit 0
-    exec python3 -B "$line/lib/shape_check.py" commit "\$top" "\${branch#item-}"
+    [ -f "\$top/.line/stage" ] || exit 0
+    exec python3 -B "$line/lib/session_check.py" commit "\$top" "\${branch#item-}"
     ;;
 esac
 HOOK
   chmod +x "$hook"
 fi
 
-cat <<SAY
+if [ "$stage" = "shape-3" ]; then
+  cat <<SAY
+
+The session for item $item is ready in:
+  $folder
+
+The item has a reviewed draft spec. Start Claude Code in that folder and say:
+  Read the draft spec of item $item with me. Use the refine-draft skill.
+
+When you have nothing more to change, the assistant commits, pushes and asks whether
+to mark the spec ready. Your yes starts the check in CI and the reviewer.
+SAY
+else
+  cat <<SAY
 
 The session for item $item is ready in:
   $folder
@@ -73,6 +90,7 @@ The session for item $item is ready in:
 Start Claude Code in that folder and say:
   Refine item $item with me. Use the refine-item skill.
 
-When no question is open, the assistant commits and pushes the decisions. Then add
-the label "answered" to the item. That starts the commit check in CI.
+When no question is open, the assistant commits, pushes and asks whether to mark the
+item answered. Your yes starts the commit check in CI.
 SAY
+fi
